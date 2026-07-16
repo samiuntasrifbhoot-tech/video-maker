@@ -1,0 +1,6 @@
+{
+  "name": "Islamic Story Video Maker",
+  "description": "An interactive, cinematic storyboard and video slideshow maker for Islamic short stories, optimized for creating reels, shorts, and TikToks with motion animations and voiceovers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
