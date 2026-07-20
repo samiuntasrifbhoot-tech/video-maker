@@ -77,7 +77,7 @@ export default function AudioSynthesizer({
   }, []);
 
   return (
-    <div className="bg-slate-900/80 backdrop-blur border border-slate-800 p-4 rounded-xl flex flex-col gap-3">
+    <div className="bg-slate-950/40 border border-slate-900/60 backdrop-blur-xl p-5 rounded-2xl cinematic-card-glow flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Music className={`w-5 h-5 ${enableMusic ? 'text-amber-500 animate-pulse' : 'text-slate-400'}`} />

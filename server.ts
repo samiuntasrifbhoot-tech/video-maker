@@ -27,6 +27,47 @@ if (apiKey) {
   });
 }
 
+// Helper function to prepend a 44-byte WAV header to raw PCM data
+function addWavHeader(pcmBuffer: Buffer, sampleRate: number = 24000): Buffer {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcmBuffer.length;
+  const chunkSize = 36 + dataSize;
+
+  const header = Buffer.alloc(44);
+
+  // RIFF identifier
+  header.write("RIFF", 0);
+  // file length
+  header.writeUInt32LE(chunkSize, 4);
+  // RIFF type
+  header.write("WAVE", 8);
+  // format chunk identifier
+  header.write("fmt ", 12);
+  // format chunk length
+  header.writeUInt32LE(16, 16);
+  // sample format (raw)
+  header.writeUInt16LE(1, 20); // 1 = PCM
+  // channel count
+  header.writeUInt16LE(numChannels, 22);
+  // sample rate
+  header.writeUInt32LE(sampleRate, 24);
+  // byte rate (sample rate * block align)
+  header.writeUInt32LE(byteRate, 28);
+  // block align (channel count * bytes per sample)
+  header.writeUInt16LE(blockAlign, 32);
+  // bits per sample
+  header.writeUInt16LE(bitsPerSample, 34);
+  // data chunk identifier
+  header.write("data", 38);
+  // data chunk length
+  header.writeUInt32LE(dataSize, 42);
+
+  return Buffer.concat([header, pcmBuffer]);
+}
+
 // API Route for Text-to-Speech using Gemini 3.1 TTS
 app.post("/api/tts", async (req, res) => {
   try {
@@ -56,13 +97,28 @@ app.post("/api/tts", async (req, res) => {
       },
     });
 
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+    let base64Audio = inlineData?.data;
+    let mimeType = inlineData?.mimeType || "audio/mp3";
 
     if (!base64Audio) {
       return res.status(500).json({ error: "মডেল থেকে কোনো ভয়েস ডেটা পাওয়া যায়নি।" });
     }
 
-    res.json({ base64Audio });
+    // Convert raw PCM to standard WAV if applicable
+    if (mimeType.includes("linear16") || mimeType.includes("pcm") || mimeType.includes("audio/raw") || mimeType === "audio/wav") {
+      const pcmBuffer = Buffer.from(base64Audio, "base64");
+      let sampleRate = 24000; // default for gemini-3.1-flash-tts-preview
+      const rateMatch = mimeType.match(/rate=(\d+)/);
+      if (rateMatch) {
+        sampleRate = parseInt(rateMatch[1], 10);
+      }
+      const wavBuffer = addWavHeader(pcmBuffer, sampleRate);
+      base64Audio = wavBuffer.toString("base64");
+      mimeType = "audio/wav";
+    }
+
+    res.json({ base64Audio, mimeType });
   } catch (err: any) {
     console.error("TTS generation error:", err);
     res.status(500).json({ error: err.message || "ভয়েস ওভার জেনারেট করতে সমস্যা হয়েছে।" });

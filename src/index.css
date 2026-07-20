@@ -9,7 +9,17 @@
 
 /* Custom styling for cinema look */
 .cinematic-glow {
-  box-shadow: 0 0 40px rgba(245, 158, 11, 0.15);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4), 0 0 40px rgba(245, 158, 11, 0.08);
+}
+
+.cinematic-card-glow {
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5), 0 0 30px rgba(245, 158, 11, 0.03);
+}
+
+.bg-aurora {
+  background: radial-gradient(circle at 50% -10%, rgba(245, 158, 11, 0.12) 0%, rgba(2, 6, 23, 0) 60%),
+              radial-gradient(circle at 15% 40%, rgba(245, 158, 11, 0.04) 0%, rgba(2, 6, 23, 0) 50%),
+              radial-gradient(circle at 85% 70%, rgba(245, 158, 11, 0.04) 0%, rgba(2, 6, 23, 0) 50%);
 }
 
 .text-shadow-custom {

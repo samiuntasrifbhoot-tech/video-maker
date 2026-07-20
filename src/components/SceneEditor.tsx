@@ -58,7 +58,11 @@ export default function SceneEditor({
       const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || "ভয়েস ওভার জেনারেট করতে সমস্যা হয়েছে।");
+        let errorMsg = data.error || "ভয়েস ওভার জেনারেট করতে সমস্যা হয়েছে।";
+        if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("limit")) {
+          errorMsg = "গুগল এআই স্টুডিও ফ্রি টিয়ারে প্রতি মিনিটে ৩টি ভয়েস জেনারেট করার লিমিট শেষ হয়েছে। অনুগ্রহ করে ১০-১৫ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন বা ব্রাউজার ফ্রি ভয়েসওভার অপশন ব্যবহার করুন।";
+        }
+        throw new Error(errorMsg);
       }
       
       // Decode base64 to binary
@@ -68,13 +72,13 @@ export default function SceneEditor({
         bytes[i] = binary.charCodeAt(i);
       }
       
-      // Create a Blob and Object URL
-      const blob = new Blob([bytes], { type: 'audio/wav' });
+      // Create a Blob and Object URL using response mimeType
+      const blob = new Blob([bytes], { type: data.mimeType || 'audio/mp3' });
       const localUrl = URL.createObjectURL(blob);
       
       updateCurrentScene({
         voiceoverAudioUrl: localUrl,
-        voiceoverAudioName: `Gemini-${selectedVoice}.wav`,
+        voiceoverAudioName: `Gemini-${selectedVoice}.${(data.mimeType || 'audio/mp3').split('/')[1] || 'mp3'}`,
       });
     } catch (err: any) {
       console.error(err);
@@ -183,40 +187,43 @@ export default function SceneEditor({
   ];
 
   return (
-    <div className="flex flex-col gap-5 bg-slate-900/40 border border-slate-800 p-5 rounded-2xl cinematic-glow">
+    <div className="flex flex-col gap-5 bg-slate-950/40 border border-slate-900/60 backdrop-blur-xl p-5 rounded-2xl cinematic-card-glow">
       {/* Title */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+      <div className="flex items-center justify-between border-b border-slate-850 pb-3">
         <div className="flex items-center gap-2">
           <Settings className="w-5 h-5 text-amber-500" />
           <h2 className="font-sans font-bold text-slate-100 text-base">সিনেম্যাটিক দৃশ্য এডিটর</h2>
         </div>
-        <span className="bg-slate-800 text-slate-300 font-mono text-xs px-2 py-0.5 rounded-md">
+        <span className="bg-slate-900 text-amber-400 border border-amber-500/10 font-mono text-xs px-2.5 py-0.5 rounded-md font-bold">
           দৃশ্য: {currentScene.sceneNumber} / {scenes.length}
         </span>
       </div>
 
       {/* Grid selector of scenes */}
       <div className="flex flex-col gap-2">
-        <span className="text-xs font-sans text-slate-400 font-semibold">দৃশ্য নির্বাচন করুন:</span>
+        <div className="flex justify-between items-center">
+          <span className="text-xs font-sans text-slate-400 font-semibold">দৃশ্য নির্বাচন করুন:</span>
+          <span className="text-[10px] font-sans text-slate-500">মোট {scenes.length}টি দৃশ্য</span>
+        </div>
         <div className="grid grid-cols-6 gap-2">
           {scenes.map((scene, idx) => (
             <button
               key={scene.id}
               onClick={() => setCurrentSceneIndex(idx)}
-              className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all duration-300 ${
+              className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all duration-350 shadow-md ${
                 idx === currentSceneIndex
-                  ? 'border-amber-500 ring-2 ring-amber-500/30 scale-105'
-                  : 'border-slate-800 hover:border-slate-600 opacity-70 hover:opacity-100'
+                  ? 'border-amber-500 ring-2 ring-amber-500/20 scale-105 shadow-amber-500/10'
+                  : 'border-slate-800/80 hover:border-slate-700 bg-slate-950 opacity-60 hover:opacity-100 hover:scale-[1.02]'
               }`}
             >
               <img
                 src={scene.imageUrl}
                 alt={scene.title}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
                 referrerPolicy="no-referrer"
               />
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                <span className="text-sm font-mono font-bold text-white text-shadow-custom">
+              <div className="absolute inset-0 bg-black/45 flex items-center justify-center transition-opacity hover:bg-black/30">
+                <span className="text-sm font-mono font-extrabold text-white text-shadow-custom">
                   {scene.sceneNumber}
                 </span>
               </div>
@@ -234,7 +241,7 @@ export default function SceneEditor({
             type="text"
             value={currentScene.title}
             onChange={(e) => updateCurrentScene({ title: e.target.value })}
-            className="bg-slate-950/80 border border-slate-800 text-slate-200 rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-amber-500/70 font-sans"
+            className="bg-slate-950/85 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20 font-sans transition-all duration-300"
           />
         </div>
 
@@ -247,7 +254,7 @@ export default function SceneEditor({
             value={currentScene.subtitle}
             onChange={(e) => updateCurrentScene({ subtitle: e.target.value })}
             rows={4}
-            className="bg-slate-950/80 border border-slate-800 text-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-amber-500/70 font-sans resize-none leading-relaxed"
+            className="bg-slate-950/85 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20 font-sans resize-none leading-relaxed transition-all duration-300"
             placeholder="স্ক্রিপ্ট লিখুন যা স্ক্রিনে প্রদর্শিত হবে..."
           />
         </div>

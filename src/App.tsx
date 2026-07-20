@@ -59,10 +59,10 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-amber-500/30 selection:text-amber-400">
+    <div className="min-h-screen bg-slate-950 bg-aurora text-slate-100 selection:bg-amber-500/30 selection:text-amber-400">
       {/* Hide standard UI in Recording Mode */}
       {!isRecordingMode && (
-        <header className="border-b border-slate-900 bg-slate-950/60 backdrop-blur-xl sticky top-0 z-40">
+        <header className="border-b border-slate-900/80 bg-slate-950/65 backdrop-blur-xl sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-xl shadow-lg shadow-amber-500/10">

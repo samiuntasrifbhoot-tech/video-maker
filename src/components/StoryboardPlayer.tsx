@@ -79,73 +79,7 @@ export default function StoryboardPlayer({
     }
   };
 
-  // Trigger voiceover for the current scene (either custom uploaded file, fallback speech synthesis, or Gemini AI TTS)
-  const playVoiceover = async (scene: Scene) => {
-    stopVoiceover();
-
-    // 1. Play custom audio file if uploaded
-    if (scene.voiceoverAudioUrl) {
-      const audio = new Audio(scene.voiceoverAudioUrl);
-      audio.volume = 1.0;
-      customAudioRef.current = audio;
-
-      if (isPlaying && countdown === null) {
-        audio.play().catch((err) => console.error('কাস্টম ভয়েস প্লেব্যাক ব্যর্থ:', err));
-      }
-      return;
-    }
-
-    if (!settings.enableVoiceover) return;
-
-    // 2. Play Gemini AI Voiceover
-    if (settings.voiceoverType === 'gemini') {
-      const cacheKey = `${scene.id}-${settings.voiceoverVoice}`;
-      const cachedUrl = geminiAudioCacheRef.current[cacheKey];
-
-      if (cachedUrl) {
-        const audio = new Audio(cachedUrl);
-        audio.volume = 1.0;
-        customAudioRef.current = audio;
-        if (isPlaying && countdown === null) {
-          audio.play().catch((err) => console.error('Gemini ভয়েস প্লেব্যাক ব্যর্থ:', err));
-        }
-      } else {
-        setIsGeneratingGlobalVoice(true);
-        try {
-          const response = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: scene.subtitle, voice: settings.voiceoverVoice }),
-          });
-          const data = await response.json();
-          if (response.ok && data.base64Audio) {
-            const binary = atob(data.base64Audio);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) {
-              bytes[i] = binary.charCodeAt(i);
-            }
-            const blob = new Blob([bytes], { type: 'audio/wav' });
-            const localUrl = URL.createObjectURL(blob);
-            geminiAudioCacheRef.current[cacheKey] = localUrl;
-
-            // Only play if the scene hasn't changed while downloading
-            if (currentScene.id === scene.id && isPlaying && countdown === null) {
-              const audio = new Audio(localUrl);
-              audio.volume = 1.0;
-              customAudioRef.current = audio;
-              audio.play().catch((err) => console.error('Gemini ভয়েস প্লেব্যাক ব্যর্থ:', err));
-            }
-          }
-        } catch (err) {
-          console.error('Gemini TTS generation failed:', err);
-        } finally {
-          setIsGeneratingGlobalVoice(false);
-        }
-      }
-      return;
-    }
-
-    // 3. Play Web Speech Synthesis
+  const playBrowserVoiceover = (scene: Scene) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     
     const text = scene.subtitle;
@@ -167,7 +101,6 @@ export default function StoryboardPlayer({
     
     utterance.onboundary = (event) => {
       if (event.name === 'word') {
-        // Find the index of the word based on character index
         const charIndex = event.charIndex;
         const precedingText = text.substring(0, charIndex);
         const wordCount = precedingText.trim().split(/\s+/).filter(Boolean).length;
@@ -177,6 +110,92 @@ export default function StoryboardPlayer({
 
     voiceoverRef.current = utterance;
     window.speechSynthesis.speak(utterance);
+  };
+
+  // Trigger voiceover for the current scene (either custom uploaded file, fallback speech synthesis, or Gemini AI TTS)
+  const playVoiceover = async (scene: Scene) => {
+    stopVoiceover();
+ 
+    // 1. Play custom audio file if uploaded
+    if (scene.voiceoverAudioUrl) {
+      const audio = new Audio(scene.voiceoverAudioUrl);
+      audio.volume = 1.0;
+      customAudioRef.current = audio;
+ 
+      if (isPlaying && countdown === null) {
+        audio.play().catch((err) => {
+          if (err.name !== 'AbortError') {
+            console.error('কাস্টম ভয়েস প্লেব্যাক ব্যর্থ:', err);
+          }
+        });
+      }
+      return;
+    }
+ 
+    if (!settings.enableVoiceover) return;
+ 
+    // 2. Play Gemini AI Voiceover
+    if (settings.voiceoverType === 'gemini') {
+      const cacheKey = `${scene.id}-${settings.voiceoverVoice}`;
+      const cachedUrl = geminiAudioCacheRef.current[cacheKey];
+ 
+      if (cachedUrl) {
+        const audio = new Audio(cachedUrl);
+        audio.volume = 1.0;
+        customAudioRef.current = audio;
+        if (isPlaying && countdown === null) {
+          audio.play().catch((err) => {
+            if (err.name !== 'AbortError') {
+              console.error('Gemini ভয়েস প্লেব্যাক ব্যর্থ:', err);
+            }
+          });
+        }
+      } else {
+        setIsGeneratingGlobalVoice(true);
+        try {
+          const response = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: scene.subtitle, voice: settings.voiceoverVoice }),
+          });
+          const data = await response.json();
+          if (response.ok && data.base64Audio) {
+            const binary = atob(data.base64Audio);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: data.mimeType || 'audio/mp3' });
+            const localUrl = URL.createObjectURL(blob);
+            geminiAudioCacheRef.current[cacheKey] = localUrl;
+ 
+            // Only play if the scene hasn't changed while downloading
+            if (currentScene.id === scene.id && isPlaying && countdown === null) {
+              const audio = new Audio(localUrl);
+              audio.volume = 1.0;
+              customAudioRef.current = audio;
+              audio.play().catch((err) => {
+                if (err.name !== 'AbortError') {
+                  console.error('Gemini ভয়েস প্লেব্যাক ব্যর্থ:', err);
+                }
+              });
+            }
+          } else {
+            console.warn('Gemini TTS API returned error. Falling back to browser speech synthesis...', data.error);
+            playBrowserVoiceover(scene);
+          }
+        } catch (err) {
+          console.error('Gemini TTS generation failed. Falling back to browser speech synthesis:', err);
+          playBrowserVoiceover(scene);
+        } finally {
+          setIsGeneratingGlobalVoice(false);
+        }
+      }
+      return;
+    }
+ 
+    // 3. Play Web Speech Synthesis
+    playBrowserVoiceover(scene);
   };
 
   // Manage slideshow timer and animation loops
@@ -267,6 +286,10 @@ export default function StoryboardPlayer({
     try {
       setIsPlaying(false);
       
+      if (!navigator?.mediaDevices?.getDisplayMedia) {
+        throw new Error("navigator.mediaDevices.getDisplayMedia is not a function or is not supported in this environment");
+      }
+
       // Request clean capture of screen/tab containing system audio
       const captureStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -700,7 +723,7 @@ export default function StoryboardPlayer({
 
       {/* Control Dashboard Panel (Hidden in Recording Mode) */}
       {!isRecordingMode && (
-        <div className="w-full max-w-3xl bg-slate-900/90 border border-slate-800 p-4 rounded-xl mt-4 flex flex-col gap-3 cinematic-glow">
+        <div className="w-full max-w-3xl bg-slate-950/40 border border-slate-900/60 backdrop-blur-xl p-5 rounded-2xl mt-4 flex flex-col gap-4 cinematic-card-glow">
           {/* Timeline and status bar */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
