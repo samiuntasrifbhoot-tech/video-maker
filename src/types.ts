@@ -39,9 +39,12 @@ export interface VideoSettings {
   enableAmbientMusic: boolean;
   musicVolume: number; // 0 to 1
   enableVoiceover: boolean;
-  voiceoverType: 'browser' | 'gemini';
+  voiceoverType: 'browser' | 'gemini' | 'custom-full';
   voiceoverVoice: string; // prebuilt voice name
   voiceoverRate: number; // 0.5 to 2
   voiceoverPitch: number; // 0.5 to 2
   voiceoverLang: string;
+  fullVoiceoverUrl?: string;
+  fullVoiceoverName?: string;
+  fullVoiceoverDuration?: number;
 }

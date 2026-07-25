@@ -61,11 +61,72 @@ function addWavHeader(pcmBuffer: Buffer, sampleRate: number = 24000): Buffer {
   // bits per sample
   header.writeUInt16LE(bitsPerSample, 34);
   // data chunk identifier
-  header.write("data", 38);
+  header.write("data", 36);
   // data chunk length
-  header.writeUInt32LE(dataSize, 42);
+  header.writeUInt32LE(dataSize, 40);
 
   return Buffer.concat([header, pcmBuffer]);
+}
+
+// Helper function for TTS with retries and proper error handling
+async function generateTTSAudio(aiClient: any, text: string, voice: string) {
+  const models = ["gemini-3.1-flash-tts-preview"];
+  let lastError: any = null;
+
+  for (const model of models) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await aiClient.models.generateContent({
+          model,
+          contents: [{ parts: [{ text }] }],
+          config: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: voice },
+              },
+            },
+          },
+        });
+
+        const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+        if (inlineData?.data) {
+          return inlineData;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || String(err);
+        const isQuota =
+          err?.status === 429 ||
+          err?.code === 429 ||
+          errMsg.includes("429") ||
+          errMsg.includes("RESOURCE_EXHAUSTED") ||
+          errMsg.includes("Quota exceeded");
+
+        const isTransient =
+          err?.status === 503 ||
+          err?.code === 503 ||
+          errMsg.includes("503") ||
+          errMsg.includes("high demand") ||
+          errMsg.includes("UNAVAILABLE");
+
+        if (isQuota) {
+          // Immediately exit loop on quota error without noisy retries
+          throw err;
+        }
+
+        console.log(`[TTS] Request retry note (${model}):`, errMsg);
+
+        if (attempt < 2 && isTransient) {
+          await new Promise((res) => setTimeout(res, 1000));
+        } else {
+          break;
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error("ভয়েস জেনারেট করা যায়নি। সার্ভার ব্যাকএন্ড অতিরিক্ত ব্যস্ত রয়েছে।");
 }
 
 // API Route for Text-to-Speech using Gemini 3.1 TTS
@@ -83,45 +144,54 @@ app.post("/api/tts", async (req, res) => {
       });
     }
 
-    // Call Gemini TTS Model
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
-      contents: [{ parts: [{ text: text }] }],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
-        },
-      },
-    });
-
-    const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+    // Call Gemini TTS with retry and model fallback
+    const inlineData = await generateTTSAudio(ai, text, voice);
     let base64Audio = inlineData?.data;
-    let mimeType = inlineData?.mimeType || "audio/mp3";
+    const rawMimeType = inlineData?.mimeType || "audio/wav";
 
     if (!base64Audio) {
       return res.status(500).json({ error: "মডেল থেকে কোনো ভয়েস ডেটা পাওয়া যায়নি।" });
     }
 
-    // Convert raw PCM to standard WAV if applicable
-    if (mimeType.includes("linear16") || mimeType.includes("pcm") || mimeType.includes("audio/raw") || mimeType === "audio/wav") {
-      const pcmBuffer = Buffer.from(base64Audio, "base64");
-      let sampleRate = 24000; // default for gemini-3.1-flash-tts-preview
-      const rateMatch = mimeType.match(/rate=(\d+)/);
-      if (rateMatch) {
-        sampleRate = parseInt(rateMatch[1], 10);
-      }
-      const wavBuffer = addWavHeader(pcmBuffer, sampleRate);
-      base64Audio = wavBuffer.toString("base64");
-      mimeType = "audio/wav";
+    const pcmBuffer = Buffer.from(base64Audio, "base64");
+
+    // Extract sample rate if present in mimeType (e.g. rate=24000)
+    let sampleRate = 24000;
+    const rateMatch = rawMimeType.match(/rate=(\d+)/i);
+    if (rateMatch) {
+      sampleRate = parseInt(rateMatch[1], 10);
     }
+
+    // Check if buffer already starts with a RIFF header
+    const isWavHeader = pcmBuffer.length >= 12 && pcmBuffer.subarray(0, 4).toString("ascii") === "RIFF";
+
+    let finalBuffer = pcmBuffer;
+    if (!isWavHeader) {
+      finalBuffer = addWavHeader(pcmBuffer, sampleRate);
+    }
+
+    base64Audio = finalBuffer.toString("base64");
+    const mimeType = "audio/wav";
 
     res.json({ base64Audio, mimeType });
   } catch (err: any) {
-    console.error("TTS generation error:", err);
-    res.status(500).json({ error: err.message || "ভয়েস ওভার জেনারেট করতে সমস্যা হয়েছে।" });
+    const errMsg = `${err?.message || err}`;
+    const isQuotaExceeded = err?.status === 429 || err?.code === 429 || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded");
+    const isBusy = err?.status === 503 || err?.code === 503 || errMsg.includes("503") || errMsg.includes("high demand");
+
+    if (isQuotaExceeded) {
+      console.log("[TTS] Free tier quota reached for Gemini TTS. Client will fallback to Web Speech API.");
+    } else {
+      console.warn("[TTS] Generation notice:", errMsg);
+    }
+
+    const userMessage = isQuotaExceeded
+      ? "Gemini AI ভয়েস কোটা অতিক্রান্ত হয়েছে (Free Tier Limit)। ব্রাউজারের নিজস্ব ভয়েস সিন্থেসাইজার ব্যবহার করা হচ্ছে।"
+      : isBusy
+      ? "Gemini AI সার্ভিসটি বর্তমানে অতিরিক্ত চাপের মধ্যে রয়েছে। সিস্টেমটি স্বয়ংক্রিয়ভাবে ব্রাউজার ভয়েসে রূপান্তরিত হচ্ছে।"
+      : err?.message || "ভয়েস ওভার জেনারেট করতে সমস্যা হয়েছে।";
+
+    res.status(500).json({ error: userMessage, isBusy: isBusy || isQuotaExceeded });
   }
 });
 

@@ -1,10 +1,40 @@
-@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@400;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Serif+Bengali:wght@400;600;700;800&family=Tiro+Bangla&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Hind Siliguri", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Noto Serif Bengali", "Playfair Display", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+.font-hind {
+  font-family: 'Hind Siliguri', sans-serif !important;
+}
+
+.font-noto-serif {
+  font-family: 'Noto Serif Bengali', serif !important;
+}
+
+.font-anek {
+  font-family: 'Anek Bangla', sans-serif !important;
+}
+
+.font-tiro {
+  font-family: 'Tiro Bangla', serif !important;
+}
+
+html, body {
+  background-color: #020617;
+  color: #f8fafc;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #0f172a;
+  color: #f8fafc;
 }
 
 /* Custom styling for cinema look */

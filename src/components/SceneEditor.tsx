@@ -12,8 +12,10 @@ import {
   Trash2,
   RefreshCw,
   Plus,
-  HelpCircle,
   Video,
+  Layers,
+  Shuffle,
+  Film,
 } from 'lucide-react';
 import { Scene, MotionPreset } from '../types';
 
@@ -24,6 +26,15 @@ interface SceneEditorProps {
   setCurrentSceneIndex: (index: number) => void;
 }
 
+const MOTION_PRESETS_LIST: MotionPreset[] = [
+  'zoom-in',
+  'zoom-out',
+  'pan-left',
+  'pan-right',
+  'tilt-up',
+  'tilt-down',
+];
+
 export default function SceneEditor({
   scenes,
   setScenes,
@@ -31,111 +42,57 @@ export default function SceneEditor({
   setCurrentSceneIndex,
 }: SceneEditorProps) {
   const currentScene = scenes[currentSceneIndex] || scenes[0];
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
+  const singleFileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState('Kore');
-  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [defaultDuration, setDefaultDuration] = useState<number>(3.5);
 
-  // Generate realistic Gemini TTS voice
-  const handleGenerateGeminiVoice = async () => {
-    if (!currentScene.subtitle) {
-      setVoiceError("ভয়েস তৈরি করার জন্য কোনো টেক্সট বা সাবটাইটেল নেই!");
-      return;
-    }
-    
-    setIsGeneratingVoice(true);
-    setVoiceError(null);
-    
-    try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: currentScene.subtitle, voice: selectedVoice }),
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        let errorMsg = data.error || "ভয়েস ওভার জেনারেট করতে সমস্যা হয়েছে।";
-        if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("limit")) {
-          errorMsg = "গুগল এআই স্টুডিও ফ্রি টিয়ারে প্রতি মিনিটে ৩টি ভয়েস জেনারেট করার লিমিট শেষ হয়েছে। অনুগ্রহ করে ১০-১৫ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন বা ব্রাউজার ফ্রি ভয়েসওভার অপশন ব্যবহার করুন।";
-        }
-        throw new Error(errorMsg);
-      }
-      
-      // Decode base64 to binary
-      const binary = atob(data.base64Audio);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      
-      // Create a Blob and Object URL using response mimeType
-      const blob = new Blob([bytes], { type: data.mimeType || 'audio/mp3' });
-      const localUrl = URL.createObjectURL(blob);
-      
-      updateCurrentScene({
-        voiceoverAudioUrl: localUrl,
-        voiceoverAudioName: `Gemini-${selectedVoice}.${(data.mimeType || 'audio/mp3').split('/')[1] || 'mp3'}`,
-      });
-    } catch (err: any) {
-      console.error(err);
-      setVoiceError(err.message || "ভয়েস জেনারেট করতে ব্যর্থ হয়েছে।");
-    } finally {
-      setIsGeneratingVoice(false);
-    }
-  };
-
-  // Update a field in the current active scene
+  // Update current scene fields
   const updateCurrentScene = (updates: Partial<Scene>) => {
     setScenes((prev) =>
       prev.map((scene, idx) => (idx === currentSceneIndex ? { ...scene, ...updates } : scene))
     );
   };
 
-  // Handle image upload and generate a local URL
-  const handleImageFile = (file: File) => {
-    if (file && file.type.startsWith('image/')) {
+  // Process multiple images at once to generate ordered scenes
+  const processBulkImages = (files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    // Sort files by name naturally (e.g. 1.jpg, 2.jpg, 10.jpg)
+    imageFiles.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    const newScenes: Scene[] = imageFiles.map((file, idx) => {
       const localUrl = URL.createObjectURL(file);
-      updateCurrentScene({
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+      // Assign alternating dynamic motion preset
+      const motion = MOTION_PRESETS_LIST[idx % MOTION_PRESETS_LIST.length];
+
+      return {
+        id: `bulk-scene-${Date.now()}-${idx}`,
+        sceneNumber: idx + 1,
+        title: `দৃশ্য ${idx + 1}: ${cleanName}`,
+        subtitle: `দৃশ্য ${idx + 1} - ক্যাপশন বা বিস্তারিত বিবরণ এখানে লিখুন`,
         imageUrl: localUrl,
         isCustomImage: true,
-      });
-    }
-  };
-
-  const handleAudioFile = (file: File) => {
-    if (file && file.type.startsWith('audio/')) {
-      const localUrl = URL.createObjectURL(file);
-      updateCurrentScene({
-        voiceoverAudioUrl: localUrl,
-        voiceoverAudioName: file.name,
-      });
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleImageFile(e.target.files[0]);
-    }
-  };
-
-  const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleAudioFile(e.target.files[0]);
-    }
-  };
-
-  const removeAudioFile = () => {
-    updateCurrentScene({
-      voiceoverAudioUrl: undefined,
-      voiceoverAudioName: undefined,
+        motionPreset: motion,
+        duration: defaultDuration,
+      };
     });
+
+    setScenes(newScenes);
+    setCurrentSceneIndex(0);
   };
 
-  // Drag and drop handlers
+  const handleBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processBulkImages(e.target.files);
+    }
+  };
+
+  // Drag and drop for bulk upload
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -150,30 +107,72 @@ export default function SceneEditor({
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleImageFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processBulkImages(e.dataTransfer.files);
     }
   };
 
-  // Reset image to original Unsplash default
-  const resetImageToDefault = () => {
-    // Original unsplash links matching scene index
-    const originalUrls = [
-      'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=1200&q=80',
-      'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80',
-      'https://images.unsplash.com/photo-1582281227297-f01cf4e39436?auto=format&fit=crop&w=1200&q=80',
-      'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1200&q=80',
-      'https://images.unsplash.com/photo-1504198453319-5ce911bafcde?auto=format&fit=crop&w=1200&q=80',
-      'https://images.unsplash.com/photo-1542810634-71277d95dcbb?auto=format&fit=crop&w=1200&q=80',
-    ];
-    
-    // Check if within bounds of initial presets
-    if (currentSceneIndex < originalUrls.length) {
-      updateCurrentScene({
-        imageUrl: originalUrls[currentSceneIndex],
-        isCustomImage: false,
-      });
+  // Single scene image change
+  const handleSingleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.type.startsWith('image/')) {
+        const localUrl = URL.createObjectURL(file);
+        updateCurrentScene({
+          imageUrl: localUrl,
+          isCustomImage: true,
+        });
+      }
     }
+  };
+
+  // Add new scene
+  const handleAddScene = () => {
+    const nextNum = scenes.length + 1;
+    const newScene: Scene = {
+      id: `scene-${Date.now()}`,
+      sceneNumber: nextNum,
+      title: `দৃশ্য ${nextNum}`,
+      subtitle: `দৃশ্য ${nextNum} এর বিবরণ`,
+      imageUrl:
+        'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=1200&q=80',
+      isCustomImage: false,
+      motionPreset: MOTION_PRESETS_LIST[(nextNum - 1) % MOTION_PRESETS_LIST.length],
+      duration: defaultDuration,
+    };
+    setScenes((prev) => [...prev, newScene]);
+    setCurrentSceneIndex(scenes.length);
+  };
+
+  // Delete scene
+  const handleDeleteScene = (indexToDelete: number) => {
+    if (scenes.length <= 1) {
+      alert('ভিডিওতে অন্তত একটি দৃশ্য থাকা আবশ্যক!');
+      return;
+    }
+    const filtered = scenes.filter((_, idx) => idx !== indexToDelete);
+    const renumbered = filtered.map((s, idx) => ({ ...s, sceneNumber: idx + 1 }));
+    setScenes(renumbered);
+    if (currentSceneIndex >= renumbered.length) {
+      setCurrentSceneIndex(renumbered.length - 1);
+    }
+  };
+
+  // Apply same duration to all scenes
+  const applyDurationToAll = (sec: number) => {
+    setDefaultDuration(sec);
+    setScenes((prev) => prev.map((s) => ({ ...s, duration: sec })));
+  };
+
+  // Randomize all camera animations
+  const randomizeAllMotions = () => {
+    setScenes((prev) =>
+      prev.map((s, idx) => ({
+        ...s,
+        motionPreset:
+          MOTION_PRESETS_LIST[Math.floor(Math.random() * MOTION_PRESETS_LIST.length)],
+      }))
+    );
   };
 
   const motionPresets: { value: MotionPreset; label: string }[] = [
@@ -188,274 +187,254 @@ export default function SceneEditor({
 
   return (
     <div className="flex flex-col gap-5 bg-slate-950/40 border border-slate-900/60 backdrop-blur-xl p-5 rounded-2xl cinematic-card-glow">
-      {/* Title */}
+      {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-850 pb-3">
         <div className="flex items-center gap-2">
-          <Settings className="w-5 h-5 text-amber-500" />
-          <h2 className="font-sans font-bold text-slate-100 text-base">সিনেম্যাটিক দৃশ্য এডিটর</h2>
+          <Film className="w-5 h-5 text-amber-500" />
+          <h2 className="font-sans font-bold text-slate-100 text-base">
+            ফেসবুক রিলস বাল্ক ফটো ও অটো এডিটর
+          </h2>
         </div>
         <span className="bg-slate-900 text-amber-400 border border-amber-500/10 font-mono text-xs px-2.5 py-0.5 rounded-md font-bold">
-          দৃশ্য: {currentScene.sceneNumber} / {scenes.length}
+          মোট দৃশ্য: {scenes.length}
         </span>
+      </div>
+
+      {/* BULK IMAGE UPLOAD BOX (High Priority Feature requested by user) */}
+      <div className="flex flex-col gap-2 bg-gradient-to-br from-amber-500/10 via-slate-900 to-slate-950 border border-amber-500/20 p-4 rounded-xl">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-sans font-extrabold text-amber-400 flex items-center gap-1.5">
+            <Layers className="w-4 h-4 text-amber-500" />
+            একসাথে সব ছবি দিয়ে রিলস বানান (Batch Upload):
+          </label>
+          <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded font-bold">
+            সিরিয়াল মেইনটেইন
+          </span>
+        </div>
+
+        <p className="text-[11px] font-sans text-slate-300 leading-relaxed">
+          আপনার ভিডিওর ছবিগুলো একবারে সিলেক্ট করুন (যেমন: ১, ২, ৩...)। সবগুলো ছবি সিরিয়াল অনুযায়ী একের পর এক সাজিয়ে অটোমেটিক রিলস ভিডিও তৈরি হয়ে যাবে।
+        </p>
+
+        <div
+          onDragEnter={handleDrag}
+          onDragOver={handleDrag}
+          onDragLeave={handleDrag}
+          onDrop={handleDrop}
+          onClick={() => bulkFileInputRef.current?.click()}
+          className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all duration-300 ${
+            dragActive
+              ? 'border-amber-400 bg-amber-500/15'
+              : 'border-amber-500/30 hover:border-amber-400 bg-slate-950/60 hover:bg-slate-950/90'
+          }`}
+        >
+          <input
+            type="file"
+            ref={bulkFileInputRef}
+            onChange={handleBulkFileChange}
+            accept="image/*"
+            multiple
+            className="hidden"
+          />
+          <Upload className="w-7 h-7 text-amber-400 mx-auto mb-1.5 animate-bounce" />
+          <p className="font-sans text-xs text-white font-bold">
+            📂 একসাথে সব ছবি সিলেক্ট করতে এখানে ক্লিক করুন (বা ড্র্যাগ করুন)
+          </p>
+          <p className="font-sans text-[10px] text-slate-400 mt-1">
+            (একাধিক ছবি একবারে বেছে নিলে সিরিয়াল অনুযায়ী রিলস দৃশ্য তৈরি হবে)
+          </p>
+        </div>
+
+        {/* Global Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 mt-1">
+          <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <span>প্রতি ছবির সময়:</span>
+            <div className="flex gap-1">
+              {[3, 3.5, 4, 5].map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => applyDurationToAll(s)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer transition-colors ${
+                    defaultDuration === s
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {s}s
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={randomizeAllMotions}
+            className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-400 text-[11px] font-sans font-bold rounded cursor-pointer transition-colors border border-amber-500/20"
+            title="সব ছবির জুম ও প্যান অ্যানিমেশন এলোমেলো করুন"
+          >
+            <Shuffle className="w-3 h-3" />
+            অ্যানিমেশন ভ্যারিয়েশন
+          </button>
+        </div>
       </div>
 
       {/* Grid selector of scenes */}
       <div className="flex flex-col gap-2">
         <div className="flex justify-between items-center">
-          <span className="text-xs font-sans text-slate-400 font-semibold">দৃশ্য নির্বাচন করুন:</span>
-          <span className="text-[10px] font-sans text-slate-500">মোট {scenes.length}টি দৃশ্য</span>
+          <span className="text-xs font-sans text-slate-400 font-semibold">
+            দৃশ্যসমূহ (অর্ডার পরিবর্তন বা এডিট করতে সিলেক্ট করুন):
+          </span>
+          <button
+            type="button"
+            onClick={handleAddScene}
+            className="flex items-center gap-1 text-[11px] font-sans font-bold text-amber-400 hover:text-amber-300 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            নতুন দৃশ্য যোগ
+          </button>
         </div>
-        <div className="grid grid-cols-6 gap-2">
+
+        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
           {scenes.map((scene, idx) => (
-            <button
+            <div
               key={scene.id}
-              onClick={() => setCurrentSceneIndex(idx)}
-              className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all duration-350 shadow-md ${
+              className={`relative group aspect-square rounded-xl overflow-hidden border-2 transition-all duration-350 shadow-md ${
                 idx === currentSceneIndex
-                  ? 'border-amber-500 ring-2 ring-amber-500/20 scale-105 shadow-amber-500/10'
-                  : 'border-slate-800/80 hover:border-slate-700 bg-slate-950 opacity-60 hover:opacity-100 hover:scale-[1.02]'
+                  ? 'border-amber-500 ring-2 ring-amber-500/20 scale-105 shadow-amber-500/10 z-10'
+                  : 'border-slate-800/80 hover:border-slate-700 bg-slate-950 opacity-70 hover:opacity-100'
               }`}
             >
-              <img
-                src={scene.imageUrl}
-                alt={scene.title}
-                className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-black/45 flex items-center justify-center transition-opacity hover:bg-black/30">
-                <span className="text-sm font-mono font-extrabold text-white text-shadow-custom">
-                  {scene.sceneNumber}
-                </span>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => setCurrentSceneIndex(idx)}
+                className="w-full h-full text-left cursor-pointer"
+              >
+                <img
+                  src={scene.imageUrl || null}
+                  alt={scene.title}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity hover:bg-black/20">
+                  <span className="text-xs font-mono font-extrabold text-white text-shadow-custom">
+                    #{scene.sceneNumber}
+                  </span>
+                </div>
+              </button>
+
+              {/* Quick Delete Scene Button */}
+              {scenes.length > 1 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteScene(idx);
+                  }}
+                  className="absolute top-1 right-1 p-1 bg-red-600/90 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow"
+                  title="দৃশ্য ডিলিট করুন"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </div>
 
-      {/* Editing options for selected scene */}
-      <div className="flex flex-col gap-4">
+      {/* Editing options for currently selected scene */}
+      <div className="flex flex-col gap-4 border-t border-slate-800/80 pt-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-sans font-bold text-amber-400">
+            দৃশ্য #{currentScene.sceneNumber} এর বিবরণ ও সেটিংস:
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono">
+            {currentScene.duration} সেকেন্ড • {currentScene.motionPreset}
+          </span>
+        </div>
+
         {/* Title input */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-sans text-slate-400 font-semibold">দৃশ্যের শিরোনাম:</label>
+          <label className="text-xs font-sans text-slate-400 font-semibold">
+            দৃশ্যের শিরোনাম (Title):
+          </label>
           <input
             type="text"
             value={currentScene.title}
             onChange={(e) => updateCurrentScene({ title: e.target.value })}
-            className="bg-slate-950/85 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20 font-sans transition-all duration-300"
+            className="bg-slate-950/85 border border-slate-800 text-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20 font-sans transition-all duration-300"
           />
         </div>
 
-        {/* Subtitle / Narrative voice script */}
+        {/* Subtitle / Script input */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-sans text-slate-400 font-semibold">
-            স্ক্রিপ্ট ও সাবটাইটেল (বাংলা):
+            ক্যাপশন বা বাংলা সাবটাইটেল (Reel Subtitle):
           </label>
           <textarea
             value={currentScene.subtitle}
             onChange={(e) => updateCurrentScene({ subtitle: e.target.value })}
-            rows={4}
-            className="bg-slate-950/85 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20 font-sans resize-none leading-relaxed transition-all duration-300"
-            placeholder="স্ক্রিপ্ট লিখুন যা স্ক্রিনে প্রদর্শিত হবে..."
+            rows={3}
+            className="bg-slate-950/85 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20 font-sans resize-none leading-relaxed transition-all duration-300"
+            placeholder="রিলসে দেখানোর জন্য বার্তা বা বাংলা সাবটাইটেল লিখুন..."
           />
         </div>
 
-        {/* Upload Image Section */}
-        <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-sans text-slate-400 font-semibold">দৃশ্যের চিত্র পরিবর্তন করুন:</label>
-          
-          <div
-            onDragEnter={handleDrag}
-            onDragOver={handleDrag}
-            onDragLeave={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-300 ${
-              dragActive
-                ? 'border-amber-500 bg-amber-500/5'
-                : 'border-slate-800 hover:border-slate-700 bg-slate-950/40 hover:bg-slate-950/80'
-            }`}
-          >
+        {/* Single Image Replace & Motion Settings */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Change Single Image */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-sans text-slate-400 font-semibold">
+              শুধু এই দৃশ্যের ছবি পরিবর্তন:
+            </label>
             <input
               type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
+              ref={singleFileInputRef}
+              onChange={handleSingleImageChange}
               accept="image/*"
               className="hidden"
             />
-            <Upload className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-            <p className="font-sans text-xs text-slate-300 font-medium">
-              আপনার ইমেজ ফাইলটি এখানে ড্র্যাগ করে ছাড়ুন অথবা ক্লিক করে সিলেক্ট করুন
-            </p>
-            <p className="font-sans text-[10px] text-slate-500 mt-1">
-              (PNG, JPG বা WebP ফরম্যাট)
-            </p>
-          </div>
-
-          {currentScene.isCustomImage && (
             <button
-              onClick={resetImageToDefault}
-              className="flex items-center gap-1.5 self-start text-[11px] font-sans text-amber-500 hover:text-amber-400 font-semibold mt-1"
+              type="button"
+              onClick={() => singleFileInputRef.current?.click()}
+              className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 hover:bg-slate-850 text-slate-200 text-xs font-sans font-semibold rounded-xl border border-slate-800 cursor-pointer transition-colors"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              ডিফল্ট ছবিতে ফিরে যান
+              <Upload className="w-3.5 h-3.5 text-amber-500" />
+              নতুন ছবি সিলেক্ট করুন
             </button>
-          )}
-        </div>
-
-        {/* Voiceover Upload Section */}
-        <div className="flex flex-col gap-2.5 border-t border-slate-800/80 pt-4 mt-1">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-sans text-slate-400 font-semibold flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              দৃশ্যের ভয়েস ওভার (Voiceover):
-            </label>
-            <span className="text-[10px] bg-amber-500/10 text-amber-400 font-sans px-2 py-0.5 rounded-full font-medium">
-              গুগল এআই স্টুডিও ২.৫ প্রো টিটিএস
-            </span>
           </div>
 
-          <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5 flex flex-col gap-3">
-            {/* Gemini TTS generator section */}
-            <div className="flex flex-col gap-2 bg-amber-500/5 border border-amber-500/10 p-3 rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-sans font-bold text-amber-400 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                  এআই ভয়েস জেনারেটর (Gemini TTS)
-                </span>
-                <span className="text-[9px] text-slate-400 font-sans">উচ্চমানের রিয়েলিস্টিক ভয়েস</span>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-sans text-slate-400">ভয়েস চরিত্র:</span>
-                  <select
-                    value={selectedVoice}
-                    onChange={(e) => setSelectedVoice(e.target.value)}
-                    className="bg-slate-900 border border-slate-800 text-slate-200 rounded px-2 py-1 text-xs font-sans focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="Kore">Kore (নারী - সুন্দর ও স্পষ্ট)</option>
-                    <option value="Zephyr">Zephyr (পুরুষ - গম্ভীর ও চমৎকার)</option>
-                    <option value="Puck">Puck (পুরুষ - প্রাণবন্ত ও আকর্ষক)</option>
-                    <option value="Charon">Charon (পুরুষ - শান্ত ও ধীর)</option>
-                    <option value="Fenrir">Fenrir (পুরুষ - গভীর ও শক্তিশালী)</option>
-                  </select>
-                </div>
-                
-                <div className="flex items-end">
-                  <button
-                    type="button"
-                    disabled={isGeneratingVoice}
-                    onClick={handleGenerateGeminiVoice}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-slate-950 text-xs font-sans font-bold rounded cursor-pointer transition-all disabled:opacity-50"
-                  >
-                    {isGeneratingVoice ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        জেনারেট হচ্ছে...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        ভয়েস জেনারেট করুন
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {voiceError && (
-                <p className="text-[10px] text-red-400 font-sans mt-1 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
-                  ⚠️ {voiceError}
-                </p>
-              )}
-            </div>
-
-            <div className="border-t border-slate-850 my-1" />
-
-            {/* Manual file upload section */}
-            <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-sans font-bold text-slate-400">ম্যানুয়াল ভয়েস ফাইল আপলোড:</span>
-              <div className="flex items-center gap-3">
-                <input
-                  type="file"
-                  ref={audioInputRef}
-                  onChange={handleAudioChange}
-                  accept="audio/*"
-                  className="hidden"
-                />
+          {/* Camera Animation preset */}
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label className="text-xs font-sans text-slate-400 font-semibold flex items-center gap-1">
+              <Video className="w-3.5 h-3.5 text-amber-500" />
+              ক্যামেরা জুম/প্যান অ্যানিমেশন ইফেক্ট (Camera Motion Effect):
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {[
+                { value: 'zoom-in', label: 'জুম ইন (Zoom In)' },
+                { value: 'zoom-out', label: 'জুম আউট (Zoom Out)' },
+                { value: 'pan-left', label: 'বামে প্যান (Pan Left)' },
+                { value: 'pan-right', label: 'ডানে প্যান (Pan Right)' },
+                { value: 'tilt-up', label: 'উপরে টিল্ট (Tilt Up)' },
+                { value: 'tilt-down', label: 'নিচে টিল্ট (Tilt Down)' },
+                { value: 'static', label: 'স্থির (Static)' },
+              ].map((m) => (
                 <button
+                  key={m.value}
                   type="button"
-                  onClick={() => audioInputRef.current?.click()}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-sans font-semibold rounded transition-colors border border-slate-700 cursor-pointer"
+                  onClick={() => updateCurrentScene({ motionPreset: m.value as MotionPreset })}
+                  className={`px-2 py-2 rounded-xl text-[11px] font-sans border text-center transition-all cursor-pointer ${
+                    currentScene.motionPreset === m.value
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-md shadow-amber-500/10'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                  }`}
                 >
-                  <Upload className="w-3.5 h-3.5 text-slate-400" />
-                  {currentScene.voiceoverAudioName ? 'ভয়েস পরিবর্তন করুন' : 'ভয়েস ফাইল আপলোড করুন'}
+                  {m.label}
                 </button>
-
-                {currentScene.voiceoverAudioName && (
-                  <button
-                    type="button"
-                    onClick={removeAudioFile}
-                    className="flex items-center gap-1.5 text-red-400 hover:text-red-300 text-xs font-sans font-semibold cursor-pointer"
-                    title="ভয়েস ডিলিট করুন"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    মুছে ফেলুন
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {currentScene.voiceoverAudioName && (
-              <div className="flex items-center gap-2 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-2 rounded-lg font-sans mt-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                <span className="truncate max-w-[200px] font-mono font-medium">{currentScene.voiceoverAudioName}</span>
-                <span className="text-[10px] text-emerald-500 shrink-0 font-bold">(সক্রিয়)</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Layout Row: Timing & Ken Burns Presets */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* Duration */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-sans text-slate-400 font-semibold flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5 text-slate-500" />
-              দৃশ্যের সময়সীমা:
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="3"
-                max="30"
-                value={currentScene.duration}
-                onChange={(e) =>
-                  updateCurrentScene({ duration: Math.max(3, parseInt(e.target.value) || 3) })
-                }
-                className="w-full bg-slate-950/80 border border-slate-800 text-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono text-center focus:outline-none focus:border-amber-500"
-              />
-              <span className="text-xs font-sans text-slate-400 font-semibold">সেকেন্ড</span>
-            </div>
-          </div>
-
-          {/* Ken Burns Motion Preset */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-sans text-slate-400 font-semibold flex items-center gap-1">
-              <Video className="w-3.5 h-3.5 text-slate-500" />
-              ক্যামেরা অ্যানিমেশন (Ken Burns):
-            </label>
-            <select
-              value={currentScene.motionPreset}
-              onChange={(e) => updateCurrentScene({ motionPreset: e.target.value as MotionPreset })}
-              className="w-full bg-slate-950/80 border border-slate-800 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-sans focus:outline-none focus:border-amber-500"
-            >
-              {motionPresets.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {preset.label}
-                </option>
               ))}
-            </select>
+            </div>
           </div>
         </div>
       </div>

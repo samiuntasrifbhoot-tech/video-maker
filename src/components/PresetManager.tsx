@@ -28,7 +28,32 @@ export default function PresetManager({
   setCurrentSceneIndex,
 }: PresetManagerProps) {
   const [copied, setCopied] = React.useState(false);
+  const [showPasteBox, setShowPasteBox] = React.useState(true); // Default open for easy access
+  const [pastedJson, setPastedJson] = React.useState('');
+  const [pasteError, setPasteError] = React.useState<string | null>(null);
+  const [pasteSuccess, setPasteSuccess] = React.useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleApplyPastedJson = () => {
+    if (!pastedJson.trim()) {
+      setPasteError('অনুগ্রহ করে বক্সে আপনার JSON কোড পেস্ট করুন!');
+      return;
+    }
+    try {
+      const imported: Scene[] = JSON.parse(pastedJson.trim());
+      if (Array.isArray(imported) && imported.length > 0) {
+        setScenes(imported);
+        setCurrentSceneIndex(0);
+        setPasteError(null);
+        setPasteSuccess(true);
+        setTimeout(() => setPasteSuccess(false), 3500);
+      } else {
+        setPasteError('ভুল ফরম্যাট! অন্তত ১টি দৃশ্য বিশিষ্ট বৈধ JSON অ্যারেই পেস্ট করুন।');
+      }
+    } catch (err) {
+      setPasteError('ভুল JSON সিনট্যাক্স! ব্র্যাকেট বা কমা সঠিক আছে কিনা পরীক্ষা করুন।');
+    }
+  };
 
   // Preset Story 2: Well of Rumah (Uthman R.)
   const uthmanWellStory: Scene[] = [
@@ -172,14 +197,24 @@ export default function PresetManager({
   };
 
   const downloadConfigFile = () => {
-    const jsonString = JSON.stringify(scenes, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'storyboard-config.json';
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      const jsonString = JSON.stringify(scenes, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `islamic-storyboard-${Date.now()}.json`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 100);
+    } catch (err) {
+      console.error('Download error:', err);
+      alert('ফাইল ডাউনলোড করতে ব্যর্থ হয়েছে। আপনি বোতাম থেকে কনফিগ কপি করে সরাসরি পেস্ট করতে পারেন।');
+    }
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -267,24 +302,79 @@ export default function PresetManager({
 
       {/* Import/Export Config section */}
       <div className="flex flex-col gap-3 border-t border-slate-800/60 pt-4">
-        <div className="flex items-center gap-2">
-          <FileJson className="w-4 h-4 text-slate-500" />
-          <span className="text-xs font-sans text-slate-400 font-semibold">কনফিগ ব্যাকআপ ও রিস্টোর (Import/Export):</span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileJson className="w-4 h-4 text-amber-500" />
+            <span className="text-xs font-sans text-slate-300 font-bold">JSON কোড পেস্ট / ইম্পোর্ট করুন:</span>
+          </div>
+          <span className="text-[10px] text-amber-400 font-sans font-semibold">কাস্টম স্ক্রিপ্ট সাপোর্ট</span>
         </div>
 
         {/* Informative Explanation of Config Import/Export */}
-        <p className="text-[11px] text-slate-400 font-sans leading-relaxed bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/60">
-          💡 <strong className="text-amber-400">কনফিগ কী এবং কেন ব্যবহার করবেন?</strong> এটি আপনার তৈরি করা সম্পূর্ণ ভিডিওর একটি ব্যাকআপ ফাইল। আপনার কাস্টমাইজড সাবটাইটেল, দৃশ্য বা আপলোড করা ছবিগুলো ব্রাউজার বন্ধ করলেও যেন হারিয়ে না যায়, তার জন্য <strong className="text-white">ফাইল ডাউনলোড</strong> করে ব্যাকআপ রাখুন। পরবর্তীতে যেকোনো সময় এখানে এসে <strong className="text-white">.JSON ফাইল আপলোড</strong> করলে আপনার সমস্ত কাজ সাথে সাথে হুবহু ফিরে আসবে!
+        <p className="text-[11px] text-slate-400 font-sans leading-relaxed bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
+          💡 <strong className="text-amber-400">সহজ উপায়ে স্ক্রিপ্ট লোড করুন:</strong> আপনার তৈরি করা স্টোরিবোর্ড ব্যাকআপ কোড নিচের বক্সে পেস্ট করে <strong className="text-white">"JSON স্টোরিবোর্ড লোড করুন"</strong> বোতামে চাপুন। অথবা সংরক্ষিত .json ফাইল ব্যাকআপ ডাউনলোড / আপলোড করুন।
         </p>
 
-        <div className="grid grid-cols-2 gap-2">
+        {/* Direct JSON Paste Textarea Section */}
+        <div className="flex flex-col gap-2 bg-slate-950/80 border border-slate-800 p-3 rounded-xl">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-sans text-slate-300 font-semibold flex items-center gap-1.5">
+              <span>📋 এখানে আপনার JSON কোড পেস্ট করুন:</span>
+            </label>
+            {pasteSuccess && (
+              <span className="text-[10px] text-green-400 font-sans font-bold animate-bounce flex items-center gap-1">
+                <Check className="w-3 h-3 text-green-400" />
+                সফলভাবে নতুন স্টোরিবোর্ড লোড হয়েছে!
+              </span>
+            )}
+          </div>
+
+          <textarea
+            value={pastedJson}
+            onChange={(e) => {
+              setPastedJson(e.target.value);
+              setPasteError(null);
+            }}
+            rows={4}
+            placeholder={`এখানে আপনার JSON কোড সরাসরি পেস্ট (Ctrl+V) করুন...
+যেমন:
+[
+  {
+    "id": "scene-1",
+    "sceneNumber": 1,
+    "title": "দৃশ্যের নাম",
+    "subtitle": "বাংলা সাবটাইটেল...",
+    "imageUrl": "https://...",
+    "duration": 8
+  }
+]`}
+            className="w-full bg-slate-900 border border-slate-800 text-slate-100 rounded-lg p-3 text-xs font-mono focus:outline-none focus:border-amber-500/80 focus:ring-1 focus:ring-amber-500/20 leading-relaxed resize-y"
+          />
+
+          {pasteError && (
+            <p className="text-[11px] font-sans text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded">
+              ⚠️ {pasteError}
+            </p>
+          )}
+
+          <button
+            onClick={handleApplyPastedJson}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-slate-950 font-sans text-xs font-bold rounded-lg transition-all duration-300 shadow-md shadow-amber-500/10 active:scale-98 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+            JSON স্টোরিবোর্ড লোড করুন
+          </button>
+        </div>
+
+        {/* Copy / Download / File Upload helpers */}
+        <div className="grid grid-cols-2 gap-2 mt-1">
           {/* Copy Config */}
           <button
             onClick={copyConfigToClipboard}
             className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-950 text-slate-300 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-sans font-medium transition-all duration-300 active:scale-95"
           >
             {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-amber-500" />}
-            {copied ? 'কপি হয়েছে' : 'কনফিগ কপি করুন'}
+            {copied ? 'কপি হয়েছে' : 'বর্তমান কনফিগ কপি করুন'}
           </button>
 
           {/* Download Config */}
@@ -293,11 +383,11 @@ export default function PresetManager({
             className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-950 text-slate-300 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-sans font-medium transition-all duration-300 active:scale-95"
           >
             <Download className="w-4 h-4 text-amber-500" />
-            ফাইল ডাউনলোড
+            .JSON ফাইল ডাউনলোড
           </button>
         </div>
 
-        {/* Import file upload button */}
+        {/* Import file upload button as secondary fallback */}
         <div className="relative">
           <input
             type="file"
@@ -308,10 +398,10 @@ export default function PresetManager({
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-850 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs font-sans font-medium transition-all duration-300 active:scale-95"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-sans font-medium transition-all duration-300 active:scale-95"
           >
-            <Upload className="w-4 h-4 text-amber-500" />
-            পূর্বের সংরক্ষিত .JSON ফাইল আপলোড করুন
+            <Upload className="w-3.5 h-3.5 text-slate-400" />
+            অথবা .JSON ফাইল আপলোড করুন
           </button>
         </div>
       </div>

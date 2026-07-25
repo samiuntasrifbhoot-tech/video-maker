@@ -154,7 +154,12 @@ export default function App() {
                 setCurrentSceneIndex={setCurrentSceneIndex}
               />
 
-              <SettingsPanel settings={settings} setSettings={setSettings} />
+              <SettingsPanel
+                settings={settings}
+                setSettings={setSettings}
+                scenes={scenes}
+                setScenes={setScenes}
+              />
 
               <PresetManager
                 scenes={scenes}

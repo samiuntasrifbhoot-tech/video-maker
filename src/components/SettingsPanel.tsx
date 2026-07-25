@@ -3,25 +3,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Type,
-  Maximize2,
   Sparkles,
-  Volume2,
   Mic,
   Palette,
   Layout,
-  AlignLeft,
+  Upload,
+  FileAudio,
+  Trash2,
+  RefreshCw,
+  Check,
 } from 'lucide-react';
-import { VideoSettings } from '../types';
+import { VideoSettings, Scene } from '../types';
 
 interface SettingsPanelProps {
   settings: VideoSettings;
   setSettings: React.Dispatch<React.SetStateAction<VideoSettings>>;
+  scenes: Scene[];
+  setScenes: React.Dispatch<React.SetStateAction<Scene[]>>;
 }
 
-export default function SettingsPanel({ settings, setSettings }: SettingsPanelProps) {
+export default function SettingsPanel({
+  settings,
+  setSettings,
+  scenes,
+  setScenes,
+}: SettingsPanelProps) {
+  const [isGeneratingFullGemini, setIsGeneratingFullGemini] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const subtitleColors = [
     { name: 'সাদা', value: '#ffffff' },
     { name: 'হলুদ', value: '#facc15' },
@@ -32,6 +44,124 @@ export default function SettingsPanel({ settings, setSettings }: SettingsPanelPr
 
   const updateSetting = <K extends keyof VideoSettings>(key: K, value: VideoSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Helper to auto-sync scenes duration proportionally based on subtitle word lengths to match target audio duration
+  const autoSyncSceneDurations = (totalAudioSec: number, scenesList: Scene[] = scenes) => {
+    if (!totalAudioSec || totalAudioSec <= 0 || scenesList.length === 0) return;
+
+    const wordCounts = scenesList.map(
+      (s) => s.subtitle.trim().split(/\s+/).filter(Boolean).length
+    );
+    const totalWords = wordCounts.reduce((a, b) => a + b, 0);
+
+    let updatedScenes: Scene[];
+
+    if (totalWords === 0) {
+      const perSceneSec = Math.max(2, Math.round(totalAudioSec / scenesList.length));
+      updatedScenes = scenesList.map((s) => ({ ...s, duration: perSceneSec }));
+    } else {
+      let accumulatedSec = 0;
+      updatedScenes = scenesList.map((s, idx) => {
+        if (idx === scenesList.length - 1) {
+          // Give remaining time to last scene
+          const remaining = Math.max(2, totalAudioSec - accumulatedSec);
+          return { ...s, duration: remaining };
+        }
+        const wCount = wordCounts[idx] || 1;
+        const calcDuration = Math.max(2, Math.round(totalAudioSec * (wCount / totalWords)));
+        accumulatedSec += calcDuration;
+        return { ...s, duration: calcDuration };
+      });
+    }
+
+    setScenes(updatedScenes);
+  };
+
+  // Handle uploading a master single voiceover audio for the whole video
+  const handleFullVoiceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const objectUrl = URL.createObjectURL(file);
+    const tempAudio = new Audio(objectUrl);
+
+    tempAudio.onloadedmetadata = () => {
+      const durationSec = Math.round(tempAudio.duration) || 30;
+      setSettings((prev) => ({
+        ...prev,
+        enableVoiceover: true,
+        voiceoverType: 'custom-full',
+        fullVoiceoverUrl: objectUrl,
+        fullVoiceoverName: file.name,
+        fullVoiceoverDuration: durationSec,
+      }));
+
+      // Automatically sync scene durations to match audio length
+      autoSyncSceneDurations(durationSec);
+    };
+  };
+
+  // Generate Gemini TTS for the ENTIRE story text at once
+  const handleGenerateFullGeminiAudio = async () => {
+    const fullText = scenes.map((s) => s.subtitle).filter(Boolean).join('. ');
+    if (!fullText.trim()) return;
+
+    setIsGeneratingFullGemini(true);
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: fullText, voice: settings.voiceoverVoice }),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.base64Audio) {
+        const binary = atob(data.base64Audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const cleanMime = (data.mimeType || 'audio/wav').split(';')[0].trim();
+        const blob = new Blob([bytes], { type: cleanMime });
+        const localUrl = URL.createObjectURL(blob);
+
+        const tempAudio = new Audio(localUrl);
+        tempAudio.onloadedmetadata = () => {
+          const durationSec = Math.round(tempAudio.duration) || 30;
+          setSettings((prev) => ({
+            ...prev,
+            enableVoiceover: true,
+            voiceoverType: 'custom-full',
+            fullVoiceoverUrl: localUrl,
+            fullVoiceoverName: `Gemini_Full_Story_${settings.voiceoverVoice}.mp3`,
+            fullVoiceoverDuration: durationSec,
+          }));
+
+          autoSyncSceneDurations(durationSec);
+        };
+      } else {
+        alert('Gemini ভয়েস জেনারেট করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।');
+      }
+    } catch (err) {
+      console.error('Full Gemini TTS failed:', err);
+      alert('ভয়েস জেনারেট করার সময়ে সমস্যা হয়েছে।');
+    } finally {
+      setIsGeneratingFullGemini(false);
+    }
+  };
+
+  const removeFullVoiceover = () => {
+    setSettings((prev) => ({
+      ...prev,
+      voiceoverType: 'gemini',
+      fullVoiceoverUrl: undefined,
+      fullVoiceoverName: undefined,
+      fullVoiceoverDuration: undefined,
+    }));
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   return (
@@ -58,7 +188,7 @@ export default function SettingsPanel({ settings, setSettings }: SettingsPanelPr
                 <button
                   key={color.value}
                   onClick={() => updateSetting('subtitleColor', color.value)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-sans border transition-all duration-300 ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-sans border transition-all duration-300 cursor-pointer ${
                     settings.subtitleColor === color.value
                       ? 'bg-slate-800 text-slate-100 border-amber-500'
                       : 'bg-slate-950/60 text-slate-400 border-slate-800/80 hover:border-slate-700'
@@ -75,54 +205,87 @@ export default function SettingsPanel({ settings, setSettings }: SettingsPanelPr
           </div>
 
           {/* Typography Pairings */}
-          <div className="grid grid-cols-2 gap-4 mt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1">
             {/* Font Family */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-slate-400 font-sans">ফন্ট ধরণ:</label>
-              <select
-                value={settings.subtitleFontFamily}
-                onChange={(e) => updateSetting('subtitleFontFamily', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-sans focus:outline-none focus:border-amber-500"
-              >
-                <option value="sans">Hind Siliguri (Sans-Serif)</option>
-                <option value="serif">Noto Serif Bengali (Serif)</option>
-              </select>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs text-slate-400 font-sans font-semibold">
+                বাংলা সাবটাইটেল ফন্ট (Bengali Fonts):
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'sans', label: 'Hind Siliguri', fontClass: 'font-hind', desc: 'মডার্ন ক্লিন' },
+                  { id: 'serif', label: 'Noto Serif Bengali', fontClass: 'font-noto-serif', desc: 'ক্ল্যাসিক সিগনেচার (২য় ফন্ট)' },
+                  { id: 'anek', label: 'Anek Bangla', fontClass: 'font-anek', desc: 'বোল্ড স্টাইলিশ' },
+                  { id: 'tiro', label: 'Tiro Bangla', fontClass: 'font-tiro', desc: 'ঐতিহ্যবাহী ট্রেডিশনাল' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => updateSetting('subtitleFontFamily', f.id)}
+                    className={`flex flex-col items-start px-3 py-2.5 rounded-xl text-xs border transition-all cursor-pointer ${
+                      settings.subtitleFontFamily === f.id
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-md shadow-amber-500/10'
+                        : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className={`text-sm ${f.fontClass}`}>অ আ ক খ (আকাঙ্ক্ষা)</span>
+                    <span className="text-[11px] font-bold mt-0.5">{f.label}</span>
+                    <span className="text-[9px] text-slate-400 opacity-80">{f.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Subtitle Position */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-slate-400 font-sans">স্ক্রিন অবস্থান:</label>
-              <select
-                value={settings.subtitlePosition}
-                onChange={(e) =>
-                  updateSetting('subtitlePosition', e.target.value as VideoSettings['subtitlePosition'])
-                }
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-sans focus:outline-none focus:border-amber-500"
-              >
-                <option value="bottom">নিচে (Bottom)</option>
-                <option value="middle">মাঝখানে (Middle)</option>
-                <option value="top">উপরে (Top)</option>
-              </select>
+              <label className="text-xs text-slate-400 font-sans font-semibold">স্ক্রিন অবস্থান (Position):</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: 'bottom', label: 'নিচে' },
+                  { id: 'middle', label: 'মাঝে' },
+                  { id: 'top', label: 'উপরে' },
+                ].map((pos) => (
+                  <button
+                    key={pos.id}
+                    type="button"
+                    onClick={() => updateSetting('subtitlePosition', pos.id as VideoSettings['subtitlePosition'])}
+                    className={`px-2 py-2 rounded-xl text-xs font-sans border text-center transition-all cursor-pointer ${
+                      settings.subtitlePosition === pos.id
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-md shadow-amber-500/10'
+                        : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                    }`}
+                  >
+                    {pos.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
           {/* Subtitle Animation */}
-          <div className="flex flex-col gap-1.5 mt-1">
-            <label className="text-xs text-slate-400 font-sans">সাবটাইটেল মোড / অ্যানিমেশন:</label>
-            <select
-              value={settings.subtitleAnimation}
-              onChange={(e) =>
-                updateSetting(
-                  'subtitleAnimation',
-                  e.target.value as VideoSettings['subtitleAnimation']
-                )
-              }
-              className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-3 py-2 text-xs font-sans focus:outline-none focus:border-amber-500"
-            >
-              <option value="word-by-word">অটো হাইলাইট - TikTok/Reels স্টাইল (Word Highlighter)</option>
-              <option value="fade-in">ধীরে প্রকাশ - Cinematic Fade-In</option>
-              <option value="none">সাধারণ প্রদর্শন - Static Subtitles</option>
-            </select>
+          <div className="flex flex-col gap-1.5 mt-2">
+            <label className="text-xs text-slate-400 font-sans font-semibold">সাবটাইটেল মোড / অ্যানিমেশন ইফেক্ট:</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {[
+                { id: 'word-by-word', label: 'অটো হাইলাইট গ্লো', desc: 'TikTok/Reels Word Highlight' },
+                { id: 'fade-in', label: 'ধীরে প্রকাশ', desc: 'Cinematic Fade-In' },
+                { id: 'none', label: 'সাধারণ প্রদর্শন', desc: 'Static Subtitle' },
+              ].map((anim) => (
+                <button
+                  key={anim.id}
+                  type="button"
+                  onClick={() => updateSetting('subtitleAnimation', anim.id as VideoSettings['subtitleAnimation'])}
+                  className={`flex flex-col items-start px-3 py-2 rounded-xl text-xs font-sans border text-left transition-all cursor-pointer ${
+                    settings.subtitleAnimation === anim.id
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-md shadow-amber-500/10'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                  }`}
+                >
+                  <span className="text-xs">{anim.label}</span>
+                  <span className="text-[10px] text-slate-400 opacity-80">{anim.desc}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Sliders row */}
@@ -173,26 +336,36 @@ export default function SettingsPanel({ settings, setSettings }: SettingsPanelPr
             <Layout className="w-4 h-4 text-slate-500" />
             দৃশ্যের ট্রানজিশন ইফেক্ট (Transitions):
           </label>
-          <select
-            value={settings.transitionStyle}
-            onChange={(e) =>
-              updateSetting('transitionStyle', e.target.value as VideoSettings['transitionStyle'])
-            }
-            className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-lg px-3 py-2 text-xs font-sans focus:outline-none focus:border-amber-500"
-          >
-            <option value="crossfade">ক্রসফেড (Crossfade)</option>
-            <option value="slide-left">বামে স্লাইড (Slide Left)</option>
-            <option value="dip-to-black">ডিপ টু ব্ল্যাক (Dip to Black)</option>
-            <option value="zoom-fade">জুম ও ফেড (Zoom & Fade)</option>
-          </select>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              { id: 'crossfade', label: 'ক্রসফেড', desc: 'Crossfade' },
+              { id: 'slide-left', label: 'স্লাইড', desc: 'Slide Left' },
+              { id: 'dip-to-black', label: 'ব্ল্যাক ফেড', desc: 'Dip to Black' },
+              { id: 'zoom-fade', label: 'জুম ফেড', desc: 'Zoom & Fade' },
+            ].map((tr) => (
+              <button
+                key={tr.id}
+                type="button"
+                onClick={() => updateSetting('transitionStyle', tr.id as VideoSettings['transitionStyle'])}
+                className={`flex flex-col items-center px-2 py-2 rounded-xl text-xs font-sans border text-center transition-all cursor-pointer ${
+                  settings.transitionStyle === tr.id
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-md shadow-amber-500/10'
+                    : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                }`}
+              >
+                <span>{tr.label}</span>
+                <span className="text-[10px] text-slate-400 opacity-80">{tr.desc}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* AI Voiceover Section */}
+        {/* Full Master Audio & Voiceover Section */}
         <div className="flex flex-col gap-3 border-t border-slate-800/60 pt-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-sans text-slate-400 font-semibold flex items-center gap-1">
               <Mic className="w-4 h-4 text-slate-500" />
-              অটো ভয়েসওভার (AI Narration):
+              সম্পূর্ণ ভিডিওর ভয়েসওভার (Master Voice Audio):
             </span>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -206,66 +379,188 @@ export default function SettingsPanel({ settings, setSettings }: SettingsPanelPr
           </div>
 
           {settings.enableVoiceover && (
-            <div className="flex flex-col gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <div className="flex flex-col gap-3 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
               {/* Voiceover Engine Selector */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] text-slate-400 font-sans">ভয়েস ইঞ্জিন ধরণ:</label>
-                <div className="grid grid-cols-2 gap-2">
+                <label className="text-[11px] text-slate-400 font-sans font-semibold">
+                  ভয়েস মোড নির্বাচন করুন:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => updateSetting('voiceoverType', 'custom-full')}
+                    className={`px-2 py-2 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 text-center ${
+                      settings.voiceoverType === 'custom-full'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/60 shadow-lg shadow-amber-500/10'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <FileAudio className="w-4 h-4 text-amber-500" />
+                    <span>১টি অডিও (Master)</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => updateSetting('voiceoverType', 'gemini')}
-                    className={`px-2.5 py-1.5 rounded text-xs font-sans font-semibold border transition-all ${
+                    className={`px-2 py-2 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 text-center ${
                       settings.voiceoverType === 'gemini'
-                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/40 shadow'
-                        : 'bg-slate-900 text-slate-400 border-slate-800/80 hover:border-slate-700'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/60 shadow-lg shadow-amber-500/10'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    Gemini AI ভয়েস (Ultra)
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Gemini AI ভয়েস</span>
                   </button>
+
                   <button
                     type="button"
                     onClick={() => updateSetting('voiceoverType', 'browser')}
-                    className={`px-2.5 py-1.5 rounded text-xs font-sans font-semibold border transition-all ${
+                    className={`px-2 py-2 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 text-center ${
                       settings.voiceoverType === 'browser'
-                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/40 shadow'
-                        : 'bg-slate-900 text-slate-400 border-slate-800/80 hover:border-slate-700'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/60 shadow-lg shadow-amber-500/10'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    ব্রাউজার ভয়েস (ফ্রি)
+                    <Mic className="w-4 h-4 text-amber-500" />
+                    <span>ব্রাউজার ভয়েস</span>
                   </button>
                 </div>
               </div>
 
-              {settings.voiceoverType === 'gemini' ? (
+              {/* MODE 1: Single Custom Full-Video Audio File */}
+              {settings.voiceoverType === 'custom-full' && (
+                <div className="flex flex-col gap-3 mt-1 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-sans font-bold text-slate-100 flex items-center gap-1.5">
+                      <FileAudio className="w-4 h-4 text-amber-500" />
+                      সম্পূর্ণ ভিডিওর জন্য ১টি ভয়েস অডিও আপলোড করুন
+                    </span>
+                    <p className="text-[10px] text-slate-400 font-sans leading-relaxed">
+                      আপনি নিজের রেকর্ড করা বা ডাউনলোড করা একটি সম্পূর্ণ অডিও ফাইল আপলোড করলে সব দৃশ্যের সাবটাইটেল এবং অটোহাইলাইট গ্লো ইফেক্ট অডিওটির সাথে নিখুঁতভাবে মিলে যাবে।
+                    </p>
+                  </div>
+
+                  {settings.fullVoiceoverUrl ? (
+                    <div className="flex flex-col gap-2 bg-slate-950 p-3 rounded-xl border border-amber-500/30">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <FileAudio className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                          <div className="flex flex-col overflow-hidden">
+                            <span className="text-xs font-sans font-bold text-slate-200 truncate">
+                              {settings.fullVoiceoverName || 'Master_Voice.mp3'}
+                            </span>
+                            <span className="text-[10px] font-mono text-amber-400 font-bold">
+                              দৈর্ঘ্য: {settings.fullVoiceoverDuration || 0} সেকেন্ড
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={removeFullVoiceover}
+                          className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                          title="অডিও মুছে ফেলুন"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          settings.fullVoiceoverDuration &&
+                          autoSyncSceneDurations(settings.fullVoiceoverDuration)
+                        }
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-xs font-sans font-bold transition-all cursor-pointer mt-1"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        সব দৃশ্যের সময়কাল অডিওর সাথে পুনরায় সিঙ্ক করুন
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        ref={fileInputRef}
+                        onChange={handleFullVoiceUpload}
+                        className="hidden"
+                        id="full-voice-file-input"
+                      />
+                      <label
+                        htmlFor="full-voice-file-input"
+                        className="flex items-center justify-center gap-2 px-4 py-3 bg-amber-500 text-slate-950 font-sans font-extrabold text-xs rounded-xl shadow-lg shadow-amber-500/20 hover:bg-amber-400 transition-all cursor-pointer"
+                      >
+                        <Upload className="w-4 h-4" />
+                        সম্পূর্ণ অডিও ফাইল সিলেক্ট করুন (MP3 / WAV)
+                      </label>
+
+                      {/* Or generate single full story Gemini TTS */}
+                      <button
+                        type="button"
+                        onClick={handleGenerateFullGeminiAudio}
+                        disabled={isGeneratingFullGemini}
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-750 text-slate-200 font-sans font-bold text-xs rounded-xl border border-slate-700/80 transition-all cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                        {isGeneratingFullGemini
+                          ? 'সম্পূর্ণ গল্পের AI ভয়েস তৈরি হচ্ছে...'
+                          : 'অথবা ১-ক্লিকে পুরো গল্পের Gemini AI অডিও বানান'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MODE 2: Gemini AI Voiceover */}
+              {settings.voiceoverType === 'gemini' && (
                 <div className="flex flex-col gap-2 mt-1">
                   <p className="text-[10px] text-slate-400 font-sans leading-relaxed">
-                    💡 <strong className="text-amber-400">Gemini 3.1 TTS</strong> ইঞ্জিন দিয়ে রিয়েল-টাইমে প্রতিটি দৃশ্যের জন্য চমৎকার ভয়েস জেনারেট করা হবে।
+                    💡 <strong className="text-amber-400">Gemini 3.1 TTS</strong> ইঞ্জিন দিয়ে দৃশ্যানুসারে উচ্চমানের ভয়েস প্লে করা হবে।
                   </p>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[11px] text-slate-400 font-sans">গ্লোবাল ভয়েস চরিত্র:</label>
-                    <select
-                      value={settings.voiceoverVoice}
-                      onChange={(e) => updateSetting('voiceoverVoice', e.target.value)}
-                      className="bg-slate-900 border border-slate-800 text-slate-200 rounded px-2 py-1.5 text-xs font-sans focus:outline-none focus:border-amber-500"
-                    >
-                      <option value="Kore">Kore (নারী - সুন্দর ও স্পষ্ট)</option>
-                      <option value="Zephyr">Zephyr (পুরুষ - গম্ভীর ও চমৎকার)</option>
-                      <option value="Puck">Puck (পুরুষ - প্রাণবন্ত ও আকর্ষক)</option>
-                      <option value="Charon">Charon (পুরুষ - শান্ত ও ধীর)</option>
-                      <option value="Fenrir">Fenrir (পুরুষ - গভীর ও শক্তিশালী)</option>
-                    </select>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] text-slate-400 font-sans font-semibold">গ্লোবাল ভয়েস চরিত্র (Gemini AI Voice):</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        { id: 'Kore', name: 'Kore', gender: 'নারী', desc: 'সুন্দর ও স্পষ্ট' },
+                        { id: 'Zephyr', name: 'Zephyr', gender: 'পুরুষ', desc: 'গম্ভীর ও চমৎকার' },
+                        { id: 'Puck', name: 'Puck', gender: 'পুরুষ', desc: 'প্রাণবন্ত ও আকর্ষক' },
+                        { id: 'Charon', name: 'Charon', gender: 'পুরুষ', desc: 'শান্ত ও ধীর' },
+                        { id: 'Fenrir', name: 'Fenrir', gender: 'পুরুষ', desc: 'গভীর ও শক্তিশালী' },
+                      ].map((v) => (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => updateSetting('voiceoverVoice', v.id)}
+                          className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-sans border transition-all cursor-pointer ${
+                            settings.voiceoverVoice === v.id
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-md shadow-amber-500/10'
+                              : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Mic className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="font-bold">{v.name}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400">
+                            {v.gender} • {v.desc}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ) : (
+              )}
+
+              {/* MODE 3: Free Browser Speech */}
+              {settings.voiceoverType === 'browser' && (
                 <div className="flex flex-col gap-2 mt-1">
                   <p className="text-[10px] text-slate-400 font-sans leading-relaxed">
-                    ভয়েসওভারটি ব্রাউজারের <strong className="text-amber-400">SpeechSynthesis</strong> ব্যবহার করে পাঠ করবে।
+                    ভয়েসওভারটি ব্রাউজারের <strong className="text-amber-400">SpeechSynthesis</strong> ব্যবহার করে স্পিচ পাঠ করবে।
                   </p>
 
-                  {/* Speech parameters */}
                   <div className="grid grid-cols-2 gap-4">
-                    {/* Speech rate */}
                     <div className="flex flex-col gap-1">
                       <label className="text-[11px] text-slate-400 font-sans flex justify-between">
                         <span>পাঠের গতি:</span>
@@ -284,7 +579,6 @@ export default function SettingsPanel({ settings, setSettings }: SettingsPanelPr
                       />
                     </div>
 
-                    {/* Speech pitch */}
                     <div className="flex flex-col gap-1">
                       <label className="text-[11px] text-slate-400 font-sans flex justify-between">
                         <span>কণ্ঠস্বর (Pitch):</span>
