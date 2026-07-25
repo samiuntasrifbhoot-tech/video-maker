@@ -16,6 +16,11 @@ import {
   Layers,
   Shuffle,
   Film,
+  ArrowLeft,
+  ArrowRight,
+  SortAsc,
+  ArrowUpDown,
+  Mic,
 } from 'lucide-react';
 import { Scene, MotionPreset } from '../types';
 
@@ -44,6 +49,7 @@ export default function SceneEditor({
   const currentScene = scenes[currentSceneIndex] || scenes[0];
   const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
   const singleFileInputRef = useRef<HTMLInputElement | null>(null);
+  const sceneAudioInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [defaultDuration, setDefaultDuration] = useState<number>(3.5);
 
@@ -54,20 +60,46 @@ export default function SceneEditor({
     );
   };
 
+  // Shift scene position in list
+  const moveScene = (fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= scenes.length) return;
+    const newScenes = [...scenes];
+    const [moved] = newScenes.splice(fromIdx, 1);
+    newScenes.splice(toIdx, 0, moved);
+    const renumbered = newScenes.map((s, idx) => ({ ...s, sceneNumber: idx + 1 }));
+    setScenes(renumbered);
+    if (currentSceneIndex === fromIdx) {
+      setCurrentSceneIndex(toIdx);
+    }
+  };
+
+  // Sort scenes alphabetically by title/filename
+  const sortScenesByName = () => {
+    const sorted = [...scenes].sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' })
+    );
+    const renumbered = sorted.map((s, idx) => ({ ...s, sceneNumber: idx + 1 }));
+    setScenes(renumbered);
+    setCurrentSceneIndex(0);
+  };
+
+  // Reverse scene order
+  const reverseScenes = () => {
+    const reversed = [...scenes].reverse();
+    const renumbered = reversed.map((s, idx) => ({ ...s, sceneNumber: idx + 1 }));
+    setScenes(renumbered);
+    setCurrentSceneIndex(0);
+  };
+
   // Process multiple images at once to generate ordered scenes
   const processBulkImages = (files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
 
-    // Sort files by name naturally (e.g. 1.jpg, 2.jpg, 10.jpg)
-    imageFiles.sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-    );
-
+    // Use file picker sequence as selected by user
     const newScenes: Scene[] = imageFiles.map((file, idx) => {
       const localUrl = URL.createObjectURL(file);
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
-      // Assign alternating dynamic motion preset
       const motion = MOTION_PRESETS_LIST[idx % MOTION_PRESETS_LIST.length];
 
       return {
@@ -282,28 +314,48 @@ export default function SceneEditor({
 
       {/* Grid selector of scenes */}
       <div className="flex flex-col gap-2">
-        <div className="flex justify-between items-center">
-          <span className="text-xs font-sans text-slate-400 font-semibold">
-            দৃশ্যসমূহ (অর্ডার পরিবর্তন বা এডিট করতে সিলেক্ট করুন):
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-sans text-slate-300 font-bold flex items-center gap-1.5">
+            দৃশ্যসমূহ (অর্ডার পরিবর্তন করতে ◀/▶ চাপুন):
           </span>
-          <button
-            type="button"
-            onClick={handleAddScene}
-            className="flex items-center gap-1 text-[11px] font-sans font-bold text-amber-400 hover:text-amber-300 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            নতুন দৃশ্য যোগ
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={sortScenesByName}
+              className="flex items-center gap-1 text-[10px] font-sans font-bold bg-slate-900 hover:bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-800 cursor-pointer"
+              title="ফাইলের নাম বা টাইটেল অনুযায়ী ক্রমানুসারে সাজান"
+            >
+              <SortAsc className="w-3 h-3 text-amber-500" />
+              নাম অনুযায়ী
+            </button>
+            <button
+              type="button"
+              onClick={reverseScenes}
+              className="flex items-center gap-1 text-[10px] font-sans font-bold bg-slate-900 hover:bg-slate-800 text-slate-300 px-2 py-1 rounded border border-slate-800 cursor-pointer"
+              title="দৃশ্যগুলোর ক্রমানুসার উল্টে দিন"
+            >
+              <ArrowUpDown className="w-3 h-3 text-amber-500" />
+              রিভার্স
+            </button>
+            <button
+              type="button"
+              onClick={handleAddScene}
+              className="flex items-center gap-1 text-[11px] font-sans font-bold text-amber-400 hover:text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded border border-amber-500/20 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              নতুন দৃশ্য যোগ
+            </button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
+        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-56 overflow-y-auto p-1 custom-scrollbar">
           {scenes.map((scene, idx) => (
             <div
               key={scene.id}
               className={`relative group aspect-square rounded-xl overflow-hidden border-2 transition-all duration-350 shadow-md ${
                 idx === currentSceneIndex
                   ? 'border-amber-500 ring-2 ring-amber-500/20 scale-105 shadow-amber-500/10 z-10'
-                  : 'border-slate-800/80 hover:border-slate-700 bg-slate-950 opacity-70 hover:opacity-100'
+                  : 'border-slate-800/80 hover:border-slate-700 bg-slate-950 opacity-75 hover:opacity-100'
               }`}
             >
               <button
@@ -324,20 +376,48 @@ export default function SceneEditor({
                 </div>
               </button>
 
-              {/* Quick Delete Scene Button */}
-              {scenes.length > 1 && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteScene(idx);
-                  }}
-                  className="absolute top-1 right-1 p-1 bg-red-600/90 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow"
-                  title="দৃশ্য ডিলিট করুন"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              )}
+              {/* Order Move & Delete Overlay Buttons */}
+              <div className="absolute top-1 inset-x-1 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                {idx > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveScene(idx, idx - 1);
+                    }}
+                    className="p-1 bg-slate-900/90 hover:bg-amber-500 hover:text-slate-950 text-white rounded-full transition-colors cursor-pointer shadow"
+                    title="বামে সরান"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                  </button>
+                )}
+                {idx < scenes.length - 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveScene(idx, idx + 1);
+                    }}
+                    className="p-1 bg-slate-900/90 hover:bg-amber-500 hover:text-slate-950 text-white rounded-full transition-colors cursor-pointer shadow ml-auto"
+                    title="ডানে সরান"
+                  >
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+                {scenes.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteScene(idx);
+                    }}
+                    className="p-1 bg-red-600/90 hover:bg-red-500 text-white rounded-full transition-opacity cursor-pointer shadow ml-1"
+                    title="দৃশ্য ডিলিট করুন"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -381,11 +461,11 @@ export default function SceneEditor({
           />
         </div>
 
-        {/* Single Image Replace & Motion Settings */}
+        {/* Single Image Replace & Duration Settings */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Change Single Image */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-sans text-slate-400 font-semibold">
+          <div className="flex flex-col gap-1.5 justify-between bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
+            <label className="text-xs font-sans text-slate-300 font-bold">
               শুধু এই দৃশ্যের ছবি পরিবর্তন:
             </label>
             <input
@@ -398,11 +478,110 @@ export default function SceneEditor({
             <button
               type="button"
               onClick={() => singleFileInputRef.current?.click()}
-              className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 hover:bg-slate-850 text-slate-200 text-xs font-sans font-semibold rounded-xl border border-slate-800 cursor-pointer transition-colors"
+              className="flex items-center justify-center gap-2 px-3 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-100 text-xs font-sans font-bold rounded-xl border border-slate-700 cursor-pointer transition-colors shadow-sm"
             >
               <Upload className="w-3.5 h-3.5 text-amber-500" />
               নতুন ছবি সিলেক্ট করুন
             </button>
+          </div>
+
+          {/* RESTORED: Single Scene Duration Option right next to Select Image */}
+          <div className="flex flex-col gap-1.5 bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-sans text-slate-300 font-bold flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-500" />
+                ছবির সময়কাল (Duration):
+              </label>
+              <span className="text-xs font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-amber-500/20">
+                {currentScene.duration}s
+              </span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="0.5"
+              value={currentScene.duration}
+              onChange={(e) => updateCurrentScene({ duration: parseFloat(e.target.value) })}
+              className="w-full accent-amber-500 h-1.5 bg-slate-950 rounded-lg cursor-pointer my-1"
+            />
+            <div className="flex gap-1 justify-between">
+              {[2, 3.5, 5, 8, 10].map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  onClick={() => updateCurrentScene({ duration: sec })}
+                  className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded cursor-pointer transition-colors ${
+                    currentScene.duration === sec
+                      ? 'bg-amber-500 text-slate-950 font-extrabold shadow'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700'
+                  }`}
+                >
+                  {sec}s
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Per-Scene Custom Voiceover Audio */}
+          <div className="flex flex-col gap-1.5 sm:col-span-2 bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-sans text-slate-300 font-bold flex items-center gap-1.5">
+                <Mic className="w-3.5 h-3.5 text-amber-500" />
+                এই নির্দিষ্ট দৃশ্যের কাস্টম ভয়েস রেকর্ড/অডিও:
+              </label>
+              {currentScene.voiceoverAudioName && (
+                <span className="text-amber-400 text-[11px] font-mono font-bold truncate max-w-[200px]">
+                  ✓ {currentScene.voiceoverAudioName}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                ref={sceneAudioInputRef}
+                accept="audio/*"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    const file = e.target.files[0];
+                    const audioUrl = URL.createObjectURL(file);
+                    const tempAudio = new Audio(audioUrl);
+                    tempAudio.onloadedmetadata = () => {
+                      const autoDur = Math.max(currentScene.duration, Math.ceil(tempAudio.duration));
+                      updateCurrentScene({
+                        voiceoverAudioUrl: audioUrl,
+                        voiceoverAudioName: file.name,
+                        duration: autoDur,
+                      });
+                    };
+                  }
+                }}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => sceneAudioInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-sans font-semibold rounded-xl border border-slate-700 cursor-pointer transition-colors"
+              >
+                <Mic className="w-3.5 h-3.5 text-amber-500" />
+                {currentScene.voiceoverAudioName ? 'ভয়েস ফাইল পরিবর্তন করুন' : 'এই দৃশ্যের নিজস্ব ভয়েস ফাইল আপলোড করুন'}
+              </button>
+              {currentScene.voiceoverAudioUrl && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateCurrentScene({
+                      voiceoverAudioUrl: undefined,
+                      voiceoverAudioName: undefined,
+                    })
+                  }
+                  className="px-3 py-2 bg-red-950/80 hover:bg-red-900 text-red-200 text-xs rounded-xl border border-red-800/80 cursor-pointer font-bold"
+                  title="অডিও মুছে ফেলুন"
+                >
+                  রিমুভ
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Camera Animation preset */}

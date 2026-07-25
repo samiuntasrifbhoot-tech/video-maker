@@ -315,15 +315,49 @@ export default function StoryboardPlayer({
           const elapsed = Date.now() - startTimeRef.current;
           elapsedTimeRef.current = elapsed;
 
-          const calculatedProgress = Math.min((elapsed / sceneDurationMs) * 100, 100);
+          // Check for active scene audio
+          const audioEl = customAudioRef.current;
+          let audioDurMs = 0;
+          if (audioEl && !isNaN(audioEl.duration) && isFinite(audioEl.duration) && audioEl.duration > 0) {
+            audioDurMs = audioEl.duration * 1000;
+          }
+
+          // Effective scene duration is whichever is longer: audio duration or configured duration
+          const effectiveSceneDurationMs = Math.max(
+            sceneDurationMs,
+            audioDurMs > 0 ? audioDurMs + 250 : 0
+          );
+
+          const calculatedProgress = Math.min((elapsed / effectiveSceneDurationMs) * 100, 100);
           setProgress(calculatedProgress);
 
-          // Word index timing
-          const wordRatio = elapsed / sceneDurationMs;
-          const wordIdx = Math.floor(wordRatio * words.length);
-          setActiveWordIndex(Math.min(Math.max(0, wordIdx), words.length - 1));
+          // Subtitle word index timing - sync directly with audio timestamp if audio playing
+          if (audioEl && !isNaN(audioEl.duration) && isFinite(audioEl.duration) && audioEl.duration > 0) {
+            const currentAudioSec = audioEl.currentTime || 0;
+            const wordRatio = Math.min(1, Math.max(0, currentAudioSec / audioEl.duration));
+            const wordIdx = Math.floor(wordRatio * words.length);
+            setActiveWordIndex(Math.min(Math.max(0, wordIdx), words.length - 1));
+          } else {
+            const wordRatio = Math.min(1, Math.max(0, elapsed / effectiveSceneDurationMs));
+            const wordIdx = Math.floor(wordRatio * words.length);
+            setActiveWordIndex(Math.min(Math.max(0, wordIdx), words.length - 1));
+          }
 
-          if (elapsed >= sceneDurationMs) {
+          // Check if audio or TTS is still playing
+          const isAudioEnded =
+            !audioEl ||
+            audioEl.ended ||
+            isNaN(audioEl.duration) ||
+            !isFinite(audioEl.duration) ||
+            audioEl.currentTime >= audioEl.duration - 0.15;
+
+          const isSpeechEnded =
+            typeof window === 'undefined' ||
+            !window.speechSynthesis ||
+            !window.speechSynthesis.speaking;
+
+          // Only advance scene when time is up AND audio/voiceover is completely finished
+          if (elapsed >= effectiveSceneDurationMs && isAudioEnded && isSpeechEnded) {
             elapsedTimeRef.current = 0;
             setProgress(0);
             setActiveWordIndex(-1);
