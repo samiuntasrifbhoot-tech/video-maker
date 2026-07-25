@@ -19,6 +19,7 @@ import AudioSynthesizer from './components/AudioSynthesizer';
 import SceneEditor from './components/SceneEditor';
 import SettingsPanel from './components/SettingsPanel';
 import PresetManager from './components/PresetManager';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { CinematicSynth } from './utils/audioSynth';
 
 export default function App() {
@@ -81,9 +82,12 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-sans bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-800">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>মুসাফির খলিফা সিরিজ • হযরত উমর (রা:)</span>
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 font-sans bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-800">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>মুসাফির খলিফা সিরিজ</span>
+              </div>
+              <PWAInstallPrompt />
             </div>
           </div>
         </header>
