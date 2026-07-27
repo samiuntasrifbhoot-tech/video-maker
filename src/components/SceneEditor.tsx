@@ -21,8 +21,10 @@ import {
   SortAsc,
   ArrowUpDown,
   Mic,
+  ListOrdered,
 } from 'lucide-react';
 import { Scene, MotionPreset } from '../types';
+import ImageSequenceModal from './ImageSequenceModal';
 
 interface SceneEditorProps {
   scenes: Scene[];
@@ -52,6 +54,10 @@ export default function SceneEditor({
   const sceneAudioInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [defaultDuration, setDefaultDuration] = useState<number>(3.5);
+
+  // Sequence Reordering Modal State
+  const [isSeqModalOpen, setIsSeqModalOpen] = useState(false);
+  const [rawFilesForSeq, setRawFilesForSeq] = useState<File[] | undefined>(undefined);
 
   // Update current scene fields
   const updateCurrentScene = (updates: Partial<Scene>) => {
@@ -96,8 +102,13 @@ export default function SceneEditor({
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
 
-    // Use file picker sequence as selected by user
-    const newScenes: Scene[] = imageFiles.map((file, idx) => {
+    // Open sequence modal so user can reorder uploaded images visually
+    setRawFilesForSeq(imageFiles);
+    setIsSeqModalOpen(true);
+  };
+
+  const handleConfirmRawSequence = (orderedFiles: File[]) => {
+    const newScenes: Scene[] = orderedFiles.map((file, idx) => {
       const localUrl = URL.createObjectURL(file);
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
       const motion = MOTION_PRESETS_LIST[idx % MOTION_PRESETS_LIST.length];
@@ -116,6 +127,7 @@ export default function SceneEditor({
 
     setScenes(newScenes);
     setCurrentSceneIndex(0);
+    setRawFilesForSeq(undefined);
   };
 
   const handleBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -318,7 +330,19 @@ export default function SceneEditor({
           <span className="text-xs font-sans text-slate-300 font-bold flex items-center gap-1.5">
             দৃশ্যসমূহ (অর্ডার পরিবর্তন করতে ◀/▶ চাপুন):
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                setRawFilesForSeq(undefined);
+                setIsSeqModalOpen(true);
+              }}
+              className="flex items-center gap-1 text-[10px] font-sans font-extrabold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/30 cursor-pointer shadow-sm"
+              title="দৃশ্য ও ছবিগুলোর ক্রম সহজে পুনর্বিন্যাস করুন"
+            >
+              <ListOrdered className="w-3.5 h-3.5 text-amber-400" />
+              ছবিগুলোর ক্রম সাজান
+            </button>
             <button
               type="button"
               onClick={sortScenesByName}
@@ -617,6 +641,22 @@ export default function SceneEditor({
           </div>
         </div>
       </div>
+
+      {/* Image Sequence Modal */}
+      <ImageSequenceModal
+        isOpen={isSeqModalOpen}
+        onClose={() => {
+          setIsSeqModalOpen(false);
+          setRawFilesForSeq(undefined);
+        }}
+        rawFiles={rawFilesForSeq}
+        onConfirmRawSequence={handleConfirmRawSequence}
+        existingScenes={scenes}
+        onConfirmSceneSequence={(orderedScenes) => {
+          setScenes(orderedScenes);
+          setCurrentSceneIndex(0);
+        }}
+      />
     </div>
   );
 }

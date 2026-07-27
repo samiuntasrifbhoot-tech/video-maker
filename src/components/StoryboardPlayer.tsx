@@ -21,6 +21,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Scene, VideoSettings } from '../types';
+import ysFixWebmDuration from 'fix-webm-duration';
 
 interface StoryboardPlayerProps {
   scenes: Scene[];
@@ -229,29 +230,30 @@ export default function StoryboardPlayer({
           const currentSec = masterAudio.currentTime || 0;
           const totalAudioSec = masterAudio.duration || settings.fullVoiceoverDuration || 30;
 
-          // Compute scene ranges in seconds
-          const totalSceneSec = scenes.reduce((sum, s) => sum + s.duration, 0);
-          const scale = totalSceneSec / (totalAudioSec || 1);
-          const mappedSec = currentSec * scale;
+          // Compute scene ranges in real-time seconds based on scene weight ratio
+          const totalSceneWeight = scenes.reduce((sum, s) => sum + s.duration, 0) || 1;
 
-          let accumulated = 0;
           let matchedSceneIdx = 0;
-          let sceneStartSec = 0;
-          let sceneLenSec = scenes[0]?.duration || 5;
+          let realSceneStart = 0;
+          let realSceneLen = (scenes[0]?.duration / totalSceneWeight) * totalAudioSec || 5;
 
+          let accWeight = 0;
           for (let i = 0; i < scenes.length; i++) {
-            const sDur = scenes[i].duration;
-            if (mappedSec >= accumulated && mappedSec < accumulated + sDur) {
+            const sWeight = scenes[i].duration;
+            const startSec = (accWeight / totalSceneWeight) * totalAudioSec;
+            const lenSec = (sWeight / totalSceneWeight) * totalAudioSec;
+
+            if (currentSec >= startSec && currentSec < startSec + lenSec) {
               matchedSceneIdx = i;
-              sceneStartSec = accumulated;
-              sceneLenSec = sDur;
+              realSceneStart = startSec;
+              realSceneLen = lenSec;
               break;
             }
-            accumulated += sDur;
+            accWeight += sWeight;
             if (i === scenes.length - 1) {
               matchedSceneIdx = scenes.length - 1;
-              sceneStartSec = accumulated - sDur;
-              sceneLenSec = sDur;
+              realSceneStart = startSec;
+              realSceneLen = lenSec;
             }
           }
 
@@ -259,16 +261,16 @@ export default function StoryboardPlayer({
             setCurrentSceneIndex(matchedSceneIdx);
           }
 
-          // Scene level progress
-          const sceneElapsed = Math.max(0, mappedSec - sceneStartSec);
-          const calculatedProgress = Math.min(100, Math.max(0, (sceneElapsed / sceneLenSec) * 100));
+          // Scene level progress in real seconds
+          const sceneElapsedReal = Math.max(0, currentSec - realSceneStart);
+          const calculatedProgress = Math.min(100, Math.max(0, (sceneElapsedReal / (realSceneLen || 1)) * 100));
           setProgress(calculatedProgress);
 
           // Subtitle word glow indexing
           const curScene = scenes[matchedSceneIdx];
-          const curWords = curScene.subtitle.trim().split(/\s+/).filter(Boolean);
+          const curWords = curScene?.subtitle ? curScene.subtitle.trim().split(/\s+/).filter(Boolean) : [];
           if (curWords.length > 0) {
-            const wordRatio = sceneElapsed / sceneLenSec;
+            const wordRatio = sceneElapsedReal / (realSceneLen || 1);
             const wordIdx = Math.floor(wordRatio * curWords.length);
             setActiveWordIndex(Math.min(Math.max(0, wordIdx), curWords.length - 1));
           } else {
@@ -322,10 +324,10 @@ export default function StoryboardPlayer({
             audioDurMs = audioEl.duration * 1000;
           }
 
-          // Effective scene duration is whichever is longer: audio duration or configured duration
+          // Effective scene duration expands to fit full audio duration + 500ms safety padding
           const effectiveSceneDurationMs = Math.max(
             sceneDurationMs,
-            audioDurMs > 0 ? audioDurMs + 250 : 0
+            audioDurMs > 0 ? audioDurMs + 500 : 0
           );
 
           const calculatedProgress = Math.min((elapsed / effectiveSceneDurationMs) * 100, 100);
@@ -349,7 +351,7 @@ export default function StoryboardPlayer({
             audioEl.ended ||
             isNaN(audioEl.duration) ||
             !isFinite(audioEl.duration) ||
-            audioEl.currentTime >= audioEl.duration - 0.15;
+            audioEl.currentTime >= audioEl.duration - 0.02;
 
           const isSpeechEnded =
             typeof window === 'undefined' ||
@@ -405,15 +407,15 @@ export default function StoryboardPlayer({
     setActiveWordIndex(-1);
 
     if (settings.enableVoiceover && settings.fullVoiceoverUrl && customAudioRef.current) {
-      const totalSceneSec = scenes.reduce((sum, s) => sum + s.duration, 0);
+      const totalSceneWeight = scenes.reduce((sum, s) => sum + s.duration, 0) || 1;
       const audioDuration = customAudioRef.current.duration || settings.fullVoiceoverDuration || 30;
 
-      let sceneStartSec = 0;
+      let accWeight = 0;
       for (let i = 0; i < currentSceneIndex; i++) {
-        sceneStartSec += scenes[i].duration;
+        accWeight += scenes[i].duration;
       }
 
-      const targetAudioSec = (sceneStartSec / totalSceneSec) * audioDuration;
+      const targetAudioSec = (accWeight / totalSceneWeight) * audioDuration;
       customAudioRef.current.currentTime = targetAudioSec;
     } else if (isPlaying) {
       playSceneVoiceover(currentScene);
@@ -666,84 +668,154 @@ ${scenesText}
       ctx.restore();
     }
 
-    // Gradient Overlay
+    // Gradient Overlay for ambient cinematic depth
     const grad = ctx.createLinearGradient(0, 0, 0, height);
     grad.addColorStop(0, 'rgba(0,0,0,0.4)');
-    grad.addColorStop(0.5, 'rgba(0,0,0,0.1)');
+    grad.addColorStop(0.5, 'rgba(0,0,0,0.15)');
     grad.addColorStop(1, 'rgba(0,0,0,0.85)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
 
-    // Top Badge
-    const badgeW = 260;
-    const badgeH = 40;
-    const badgeX = (width - badgeW) / 2;
-    const badgeY = 28;
-
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    if (typeof (ctx as any).roundRect === 'function') {
-      (ctx as any).roundRect(badgeX, badgeY, badgeW, badgeH, 20);
-    } else {
-      ctx.rect(badgeX, badgeY, badgeW, badgeH);
-    }
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#f59e0b';
-    ctx.font = 'bold 15px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`SCENE ${sceneIndex + 1} / ${totalScenes}`, width / 2, badgeY + badgeH / 2);
-
-    // Subtitle Text Box
-    if (scene.subtitle) {
-      const textY = height - 120;
+    // Subtitle Rendering (Exact Preview Sync with Word-by-Word Glow)
+    if (scene.subtitle && scene.subtitle.trim()) {
       let fontFamilyName = '"Hind Siliguri", sans-serif';
       if (settings.subtitleFontFamily === 'serif') fontFamilyName = '"Noto Serif Bengali", serif';
       else if (settings.subtitleFontFamily === 'anek') fontFamilyName = '"Anek Bangla", sans-serif';
       else if (settings.subtitleFontFamily === 'tiro') fontFamilyName = '"Tiro Bangla", serif';
 
-      ctx.font = `bold 24px ${fontFamilyName}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      const scaleFactor = width / 380;
+      const baseFontSize = Math.round((settings.subtitleFontSize || 20) * scaleFactor);
 
       const words = scene.subtitle.trim().split(/\s+/);
-      let line = '';
-      const lines: string[] = [];
-      const maxW = width - 100;
+      const activeWordIndex = Math.min(
+        Math.max(0, Math.floor(p * words.length)),
+        words.length - 1
+      );
 
-      for (let n = 0; n < words.length; n++) {
-        const testLine = line + words[n] + ' ';
-        const metrics = ctx.measureText(testLine);
-        if (metrics.width > maxW && n > 0) {
-          lines.push(line);
-          line = words[n] + ' ';
+      const isWordByWord = settings.subtitleAnimation === 'word-by-word';
+
+      ctx.font = `bold ${baseFontSize}px ${fontFamilyName}`;
+
+      const maxW = width - 80 * scaleFactor;
+      const spaceWidth = ctx.measureText(' ').width;
+
+      interface LineWord {
+        text: string;
+        index: number;
+        width: number;
+      }
+
+      interface WrappedLine {
+        words: LineWord[];
+        totalWidth: number;
+      }
+
+      const lines: WrappedLine[] = [];
+      let currentLineWords: LineWord[] = [];
+      let currentLineWidth = 0;
+
+      words.forEach((wordText, idx) => {
+        const wordWidth = ctx.measureText(wordText).width;
+
+        if (currentLineWords.length > 0 && currentLineWidth + spaceWidth + wordWidth > maxW) {
+          lines.push({
+            words: currentLineWords,
+            totalWidth: currentLineWidth,
+          });
+          currentLineWords = [{ text: wordText, index: idx, width: wordWidth }];
+          currentLineWidth = wordWidth;
         } else {
-          line = testLine;
+          if (currentLineWords.length > 0) {
+            currentLineWidth += spaceWidth;
+          }
+          currentLineWords.push({ text: wordText, index: idx, width: wordWidth });
+          currentLineWidth += wordWidth;
         }
+      });
+
+      if (currentLineWords.length > 0) {
+        lines.push({
+          words: currentLineWords,
+          totalWidth: currentLineWidth,
+        });
       }
-      lines.push(line);
 
-      const lineHeight = 36;
-      const padding = 18;
-      const boxH = lines.length * lineHeight + padding * 2;
-      const boxY = textY - boxH / 2;
+      const lineHeight = baseFontSize * 1.5;
+      const totalTextHeight = lines.length * lineHeight;
+      const paddingV = 16 * scaleFactor;
+      const paddingH = 24 * scaleFactor;
+      const boxHeight = totalTextHeight + paddingV * 2;
 
-      ctx.fillStyle = `rgba(15, 23, 42, ${settings.subtitleBgOpacity || 0.8})`;
-      ctx.beginPath();
-      if (typeof (ctx as any).roundRect === 'function') {
-        (ctx as any).roundRect(40, boxY, width - 80, boxH, 16);
+      let boxY = 0;
+      if (settings.subtitlePosition === 'top') {
+        boxY = height * 0.12;
+      } else if (settings.subtitlePosition === 'middle') {
+        boxY = (height - boxHeight) / 2;
       } else {
-        ctx.rect(40, boxY, width - 80, boxH);
+        // bottom position with safe distance above bottom progress bar
+        boxY = height - boxHeight - 90 * (height / 1280);
       }
-      ctx.fill();
 
-      ctx.fillStyle = settings.subtitleColor || '#ffffff';
-      lines.forEach((l, idx) => {
-        ctx.fillText(l.trim(), width / 2, boxY + padding + idx * lineHeight + lineHeight / 2);
+      // Draw background box
+      const bgOpacity = settings.subtitleBgOpacity ?? 0.8;
+      if (bgOpacity > 0) {
+        ctx.save();
+        ctx.fillStyle = `rgba(0, 0, 0, ${bgOpacity})`;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 12 * scaleFactor;
+
+        const maxLineWidth = Math.max(...lines.map((l) => l.totalWidth));
+        const boxWidth = Math.min(width - 40 * scaleFactor, maxLineWidth + paddingH * 2);
+        const boxX = (width - boxWidth) / 2;
+
+        ctx.beginPath();
+        if (typeof (ctx as any).roundRect === 'function') {
+          (ctx as any).roundRect(boxX, boxY, boxWidth, boxHeight, 16 * scaleFactor);
+        } else {
+          ctx.rect(boxX, boxY, boxWidth, boxHeight);
+        }
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Draw words with glow on active word
+      lines.forEach((line, lineIdx) => {
+        const lineY = boxY + paddingV + lineIdx * lineHeight;
+        const startX = (width - line.totalWidth) / 2;
+        let xPointer = startX;
+
+        line.words.forEach((wObj) => {
+          const isActive = isWordByWord && wObj.index === activeWordIndex;
+
+          ctx.save();
+          ctx.textBaseline = 'top';
+
+          if (isActive) {
+            // Vibrant yellow glow effect
+            ctx.font = `bold ${Math.round(baseFontSize * 1.1)}px ${fontFamilyName}`;
+            ctx.fillStyle = '#fef08a';
+            ctx.shadowColor = '#f59e0b';
+            ctx.shadowBlur = 24 * scaleFactor;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+
+            // Draw twice for vivid glow highlight
+            ctx.fillText(wObj.text, xPointer, lineY - baseFontSize * 0.05);
+            ctx.fillText(wObj.text, xPointer, lineY - baseFontSize * 0.05);
+          } else {
+            // Normal word
+            ctx.font = `bold ${baseFontSize}px ${fontFamilyName}`;
+            ctx.fillStyle = settings.subtitleColor || '#ffffff';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+            ctx.shadowBlur = 6 * scaleFactor;
+            ctx.shadowOffsetY = 2 * scaleFactor;
+
+            ctx.fillText(wObj.text, xPointer, lineY);
+          }
+
+          ctx.restore();
+          xPointer += wObj.width + spaceWidth;
+        });
       });
     }
 
@@ -793,14 +865,87 @@ ${scenesText}
         )
       );
 
-      const stream = canvas.captureStream(30);
+      // Create Web Audio destination for embedding voiceover into exported video
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) {
+        throw new Error('Web Audio API not supported in this browser');
+      }
+      const audioCtx = new AudioCtxClass();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      const audioDestNode = audioCtx.createMediaStreamDestination();
+
+      // Helper function to decode any audio URL (Blob, DataURL, or HTTP) into AudioBuffer
+      const decodeAudioUrl = async (url: string): Promise<AudioBuffer | null> => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return null;
+          const ab = await res.arrayBuffer();
+          return await audioCtx.decodeAudioData(ab);
+        } catch (e) {
+          console.warn('Export audio decode note:', url, e);
+          return null;
+        }
+      };
+
+      const scenesTotalSettingSec = scenes.reduce((sum, s) => sum + s.duration, 0) || 1;
+      let totalVideoSeconds = scenesTotalSettingSec;
+
+      // Prepare audio buffer sources before recording
+      if (settings.enableVoiceover && settings.fullVoiceoverUrl) {
+        const masterBuffer = await decodeAudioUrl(settings.fullVoiceoverUrl);
+        if (masterBuffer) {
+          totalVideoSeconds = Math.max(masterBuffer.duration, scenesTotalSettingSec);
+          const masterSource = audioCtx.createBufferSource();
+          masterSource.buffer = masterBuffer;
+          masterSource.connect(audioDestNode);
+          masterSource.connect(audioCtx.destination);
+          masterSource.start(0);
+        }
+      } else if (settings.enableVoiceover) {
+        let accStart = 0;
+        const sceneStartTimes: number[] = [];
+        for (let i = 0; i < scenes.length; i++) {
+          sceneStartTimes.push(accStart);
+          accStart += scenes[i].duration;
+        }
+        totalVideoSeconds = accStart;
+
+        for (let i = 0; i < scenes.length; i++) {
+          const activeScene = scenes[i];
+          const sceneAudioUrl =
+            activeScene.voiceoverAudioUrl ||
+            geminiAudioCacheRef.current[`${activeScene.id}-${settings.voiceoverVoice}`];
+
+          if (sceneAudioUrl) {
+            const buf = await decodeAudioUrl(sceneAudioUrl);
+            if (buf) {
+              const src = audioCtx.createBufferSource();
+              src.buffer = buf;
+              src.connect(audioDestNode);
+              src.connect(audioCtx.destination);
+              src.start(audioCtx.currentTime + sceneStartTimes[i]);
+            }
+          }
+        }
+      }
+
+      const canvasStream = canvas.captureStream(30);
+      const audioTracks = audioDestNode.stream.getAudioTracks();
+
+      const combinedTracks = [...canvasStream.getVideoTracks(), ...audioTracks];
+      const exportStream = new MediaStream(combinedTracks);
+
       const recordedChunks: Blob[] = [];
 
       const mimeTypes = [
-        'video/webm;codecs=vp9',
-        'video/webm;codecs=vp8',
-        'video/webm',
+        'video/mp4;codecs=avc1,mp4a',
+        'video/mp4;codecs=h264,aac',
         'video/mp4',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
       ];
       let selectedMime = '';
       for (const m of mimeTypes) {
@@ -811,8 +956,8 @@ ${scenesText}
       }
 
       const recorder = new MediaRecorder(
-        stream,
-        selectedMime ? { mimeType: selectedMime } : {}
+        exportStream,
+        selectedMime ? { mimeType: selectedMime, audioBitsPerSecond: 128000 } : {}
       );
 
       recorder.ondataavailable = (e) => {
@@ -821,13 +966,31 @@ ${scenesText}
         }
       };
 
-      recorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: selectedMime || 'video/webm' });
-        const url = URL.createObjectURL(blob);
+      recorder.onstop = async () => {
+        const rawBlob = new Blob(recordedChunks, { type: selectedMime || 'video/webm' });
+        const durationMs = Math.round(totalVideoSeconds * 1000);
+
+        let finalBlob = rawBlob;
+        if (!selectedMime || selectedMime.includes('webm')) {
+          try {
+            finalBlob = await new Promise<Blob>((resolve) => {
+              ysFixWebmDuration(rawBlob, durationMs, (fixed) => {
+                resolve(fixed);
+              });
+            });
+          } catch (e) {
+            console.warn('Webm duration fix note:', e);
+          }
+        }
+
+        const isMp4 = selectedMime.includes('mp4');
+        const fileExt = isMp4 ? 'mp4' : 'webm';
+
+        const url = URL.createObjectURL(finalBlob);
         const a = document.createElement('a');
         a.href = url;
         const safeTitle = scenes[0]?.title.substring(0, 15).replace(/\s+/g, '_') || 'facebook_reel';
-        a.download = `${safeTitle}-${Date.now()}.webm`;
+        a.download = `${safeTitle}-${Date.now()}.${fileExt}`;
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
@@ -836,36 +999,56 @@ ${scenesText}
           URL.revokeObjectURL(url);
         }, 200);
 
+        if (audioCtx) {
+          audioCtx.close().catch(() => {});
+        }
+
         setIsCanvasExporting(false);
         setExportPercent(100);
       };
 
-      recorder.start();
+      recorder.start(100);
 
       const fps = 30;
-      const totalVideoSeconds = scenes.reduce((sum, s) => sum + s.duration, 0);
       const totalFrames = Math.ceil(totalVideoSeconds * fps);
       let currentFrame = 0;
+      const exportStartTime = Date.now();
 
       const renderNextFrame = () => {
-        if (currentFrame >= totalFrames) {
+        const elapsed = (Date.now() - exportStartTime) / 1000;
+
+        if (currentFrame >= totalFrames || elapsed >= totalVideoSeconds + 0.3) {
           recorder.stop();
           return;
         }
 
-        let elapsed = currentFrame / fps;
         let sceneIdx = 0;
         let sceneProgress = 0;
 
-        let acc = 0;
-        for (let i = 0; i < scenes.length; i++) {
-          const d = scenes[i].duration;
-          if (elapsed <= acc + d || i === scenes.length - 1) {
-            sceneIdx = i;
-            sceneProgress = Math.min(1, Math.max(0, (elapsed - acc) / d));
-            break;
+        if (settings.enableVoiceover && settings.fullVoiceoverUrl) {
+          let accWeight = 0;
+          for (let i = 0; i < scenes.length; i++) {
+            const w = scenes[i].duration;
+            const startSec = (accWeight / scenesTotalSettingSec) * totalVideoSeconds;
+            const lenSec = (w / scenesTotalSettingSec) * totalVideoSeconds;
+            if (elapsed >= startSec && (elapsed < startSec + lenSec || i === scenes.length - 1)) {
+              sceneIdx = i;
+              sceneProgress = Math.min(1, Math.max(0, (elapsed - startSec) / (lenSec || 1)));
+              break;
+            }
+            accWeight += w;
           }
-          acc += d;
+        } else {
+          let acc = 0;
+          for (let i = 0; i < scenes.length; i++) {
+            const d = scenes[i].duration;
+            if (elapsed <= acc + d || i === scenes.length - 1) {
+              sceneIdx = i;
+              sceneProgress = Math.min(1, Math.max(0, (elapsed - acc) / d));
+              break;
+            }
+            acc += d;
+          }
         }
 
         const activeScene = scenes[sceneIdx];

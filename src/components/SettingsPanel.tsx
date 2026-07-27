@@ -58,18 +58,18 @@ export default function SettingsPanel({
     let updatedScenes: Scene[];
 
     if (totalWords === 0) {
-      const perSceneSec = Math.max(2, Math.round(totalAudioSec / scenesList.length));
+      const perSceneSec = Math.max(2, Math.round((totalAudioSec / scenesList.length) * 10) / 10);
       updatedScenes = scenesList.map((s) => ({ ...s, duration: perSceneSec }));
     } else {
       let accumulatedSec = 0;
       updatedScenes = scenesList.map((s, idx) => {
         if (idx === scenesList.length - 1) {
           // Give remaining time to last scene
-          const remaining = Math.max(2, totalAudioSec - accumulatedSec);
+          const remaining = Math.max(2, Math.round((totalAudioSec - accumulatedSec) * 10) / 10);
           return { ...s, duration: remaining };
         }
         const wCount = wordCounts[idx] || 1;
-        const calcDuration = Math.max(2, Math.round(totalAudioSec * (wCount / totalWords)));
+        const calcDuration = Math.max(2, Math.round((totalAudioSec * (wCount / totalWords)) * 10) / 10);
         accumulatedSec += calcDuration;
         return { ...s, duration: calcDuration };
       });
@@ -385,44 +385,31 @@ export default function SettingsPanel({
                 <label className="text-[11px] text-slate-400 font-sans font-semibold">
                   ভয়েস মোড নির্বাচন করুন:
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => updateSetting('voiceoverType', 'custom-full')}
-                    className={`px-2 py-2 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 text-center ${
+                    className={`px-2 py-2.5 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex items-center justify-center gap-2 text-center ${
                       settings.voiceoverType === 'custom-full'
                         ? 'bg-amber-500/15 text-amber-400 border-amber-500/60 shadow-lg shadow-amber-500/10'
                         : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <FileAudio className="w-4 h-4 text-amber-500" />
-                    <span>১টি অডিও (Master)</span>
+                    <span>১টি অডিও (Master Upload)</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => updateSetting('voiceoverType', 'gemini')}
-                    className={`px-2 py-2 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 text-center ${
+                    className={`px-2 py-2.5 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex items-center justify-center gap-2 text-center ${
                       settings.voiceoverType === 'gemini'
                         ? 'bg-amber-500/15 text-amber-400 border-amber-500/60 shadow-lg shadow-amber-500/10'
                         : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <Sparkles className="w-4 h-4 text-amber-500" />
-                    <span>Gemini AI ভয়েস</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => updateSetting('voiceoverType', 'browser')}
-                    className={`px-2 py-2 rounded-lg text-[11px] font-sans font-bold border transition-all cursor-pointer flex flex-col items-center gap-1 text-center ${
-                      settings.voiceoverType === 'browser'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/60 shadow-lg shadow-amber-500/10'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <Mic className="w-4 h-4 text-amber-500" />
-                    <span>ব্রাউজার ভয়েস</span>
+                    <span>Gemini AI স্টুডিও ভয়েস</span>
                   </button>
                 </div>
               </div>
@@ -548,53 +535,6 @@ export default function SettingsPanel({
                           </span>
                         </button>
                       ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* MODE 3: Free Browser Speech */}
-              {settings.voiceoverType === 'browser' && (
-                <div className="flex flex-col gap-2 mt-1">
-                  <p className="text-[10px] text-slate-400 font-sans leading-relaxed">
-                    ভয়েসওভারটি ব্রাউজারের <strong className="text-amber-400">SpeechSynthesis</strong> ব্যবহার করে স্পিচ পাঠ করবে।
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[11px] text-slate-400 font-sans flex justify-between">
-                        <span>পাঠের গতি:</span>
-                        <span className="font-mono text-[10px] text-amber-500 font-bold">
-                          {settings.voiceoverRate}x
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0.6"
-                        max="1.6"
-                        step="0.1"
-                        value={settings.voiceoverRate}
-                        onChange={(e) => updateSetting('voiceoverRate', parseFloat(e.target.value))}
-                        className="w-full accent-amber-500 h-1 bg-slate-800 rounded-lg cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[11px] text-slate-400 font-sans flex justify-between">
-                        <span>কণ্ঠস্বর (Pitch):</span>
-                        <span className="font-mono text-[10px] text-amber-500 font-bold">
-                          {settings.voiceoverPitch}
-                        </span>
-                      </label>
-                      <input
-                        type="range"
-                        min="0.6"
-                        max="1.4"
-                        step="0.1"
-                        value={settings.voiceoverPitch}
-                        onChange={(e) => updateSetting('voiceoverPitch', parseFloat(e.target.value))}
-                        className="w-full accent-amber-500 h-1 bg-slate-800 rounded-lg cursor-pointer"
-                      />
                     </div>
                   </div>
                 </div>
