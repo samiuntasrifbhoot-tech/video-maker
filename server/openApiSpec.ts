@@ -67,6 +67,7 @@ export const openApiSpec = {
         description:
           "Enqueues a video generation task with scripts, scene keyframes, motion presets, voice settings, and background audio. Returns a Job ID immediately for async status polling.",
         operationId: "generateVideo",
+        security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -120,6 +121,12 @@ export const openApiSpec = {
           },
           "400": {
             description: "Invalid request body format",
+          },
+          "401": {
+            description: "Unauthorized - Invalid or missing API Key",
+          },
+          "429": {
+            description: "Rate limit exceeded",
           },
         },
       },
@@ -228,6 +235,7 @@ export const openApiSpec = {
         summary: "Generate Voiceover Audio with Gemini TTS",
         description: "Synthesizes spoken text into high-quality WAV speech audio with custom voice tone.",
         operationId: "generateTTS",
+        security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -293,6 +301,7 @@ export const openApiSpec = {
         summary: "Execute Model Context Protocol (MCP) Tool Call",
         description: "Standard endpoint for executing AI assistant tool calls programmatically.",
         operationId: "callMcpTool",
+        security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }],
         responses: {
           "200": {
             description: "Tool execution result",
@@ -302,6 +311,20 @@ export const openApiSpec = {
     },
   },
   components: {
+    securitySchemes: {
+      ApiKeyAuth: {
+        type: "apiKey",
+        in: "header",
+        name: "X-API-Key",
+        description: "Custom API Key authentication header",
+      },
+      BearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "API Key",
+        description: "Bearer token authentication format",
+      },
+    },
     schemas: {
       HealthResponse: {
         type: "object",

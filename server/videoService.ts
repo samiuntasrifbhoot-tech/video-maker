@@ -4,6 +4,7 @@
  */
 
 import { jobStore, VideoJob, VideoJobPayload } from './jobStore';
+import { renderVideoPipeline } from './videoRenderer';
 
 export class VideoService {
   /**
@@ -28,69 +29,24 @@ export class VideoService {
   }
 
   /**
-   * Background render pipeline processing
+   * Background render pipeline processing using real canvas & ffmpeg rendering
    */
   private async processRenderJob(jobId: string, payload: VideoJobPayload): Promise<void> {
-    const startTime = Date.now();
+    jobStore.updateJob(jobId, { status: 'processing', progress: 5 });
 
-    // Step 1: Queued -> Processing (Phase 1: Parsing Script & Scene Preparation)
-    jobStore.updateJob(jobId, { status: 'processing', progress: 15 });
-    await new Promise((res) => setTimeout(res, 800));
+    const renderResult = await renderVideoPipeline(jobId, payload, (progressPercent) => {
+      jobStore.updateJob(jobId, { progress: Math.min(99, progressPercent) });
+    });
 
-    // Phase 2: Audio Synthesis & Motion Frame Composition
-    jobStore.updateJob(jobId, { progress: 45 });
-    await new Promise((res) => setTimeout(res, 1200));
-
-    // Phase 3: Canvas Rendering & Keyframe Animation Sync
-    jobStore.updateJob(jobId, { progress: 75 });
-    await new Promise((res) => setTimeout(res, 1000));
-
-    // Phase 4: Video Encoding & Master Export Assembly
-    jobStore.updateJob(jobId, { progress: 95 });
-    await new Promise((res) => setTimeout(res, 600));
-
-    // Compute scene metadata
-    const sceneCount = payload.scenes?.length || 1;
-    const totalDurationSeconds =
-      payload.duration ||
-      payload.scenes?.reduce((acc, sc) => acc + (sc.duration || 4), 0) ||
-      15;
-
-    const title = payload.title || 'AI Generated Video Story';
-
-    // First scene image or fallback thumbnail
-    const firstSceneImage = payload.scenes?.[0]?.imageUrl;
-    const thumbnailUrl =
-      firstSceneImage && firstSceneImage.startsWith('http')
-        ? firstSceneImage
-        : `https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=800&auto=format&fit=crop&q=80`;
-
-    const aspectRatio = payload.renderSettings?.aspectRatio || '9:16';
-    const resolution = payload.renderSettings?.resolution || '1080p';
-    const format = payload.renderSettings?.format || 'mp4';
-
-    const executionTime = Date.now() - startTime;
-
-    // Set completed status
+    // Update job to completed with actual rendered video result
     jobStore.updateJob(jobId, {
       status: 'completed',
       progress: 100,
       result: {
-        videoUrl: `/api/video/${jobId}.${format}`,
-        downloadUrl: `/api/video/${jobId}.${format}?download=true`,
-        thumbnailUrl,
-        metadata: {
-          title,
-          totalScenes: sceneCount,
-          totalDurationSeconds,
-          aspectRatio,
-          resolution,
-          format,
-          hasVoiceover: Boolean(payload.voiceSettings),
-          hasMusic: Boolean(payload.music?.enableAmbientMusic),
-          renderedAt: new Date().toISOString(),
-          jobExecutionTimeMs: executionTime,
-        },
+        videoUrl: renderResult.videoUrl,
+        downloadUrl: renderResult.downloadUrl,
+        thumbnailUrl: renderResult.thumbnailUrl,
+        metadata: renderResult.metadata,
       },
     });
   }

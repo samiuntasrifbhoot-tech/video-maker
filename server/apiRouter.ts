@@ -3,17 +3,42 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { videoService } from './videoService';
 import { jobStore } from './jobStore';
 import { openApiSpec } from './openApiSpec';
 import { MCP_TOOLS_CATALOG, executeMcpTool } from './mcpTools';
+import { handleMcpJsonRpcRequest } from './mcpServer';
 import { ISLAMIC_SCRIPT_LIBRARY } from '../src/data/islamicScripts';
 import { GoogleGenAI } from '@google/genai';
+import { logger } from './logger';
+import { rateLimiter } from './rateLimiter';
+import { authenticateApiKey } from './auth';
 
 export const apiRouter = Router();
 
 const startTime = Date.now();
+
+// ---------------------------------------------------------------------------
+// Middlewares: Global Request Logging & Rate Limiting
+// ---------------------------------------------------------------------------
+apiRouter.use((req: Request, res: Response, next: NextFunction) => {
+  const reqStartTime = Date.now();
+  res.on('finish', () => {
+    const durationMs = Date.now() - reqStartTime;
+    logger.info(`HTTP ${req.method} ${req.path} ${res.statusCode} - ${durationMs}ms`, {
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs,
+    });
+  });
+  next();
+});
+
+apiRouter.use(rateLimiter);
 
 // Lazy initialization for Gemini AI
 let aiClient: GoogleGenAI | null = null;
@@ -35,7 +60,7 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Health Status Endpoint
+// 1. Health Status Endpoint (Public)
 // ---------------------------------------------------------------------------
 apiRouter.get('/health', (req: Request, res: Response) => {
   const uptimeSeconds = (Date.now() - startTime) / 1000;
@@ -53,14 +78,17 @@ apiRouter.get('/health', (req: Request, res: Response) => {
       openApiDocumentation: true,
       geminiTtsVoiceover: aiAvailable,
       scriptLibrary: true,
+      persistentStorage: true,
+      rateLimiting: true,
+      apiKeyAuth: Boolean(process.env.API_KEY),
     },
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Generate Video Job Endpoint
+// 2. Generate Video Job Endpoint (Protected)
 // ---------------------------------------------------------------------------
-apiRouter.post('/generate-video', (req: Request, res: Response) => {
+apiRouter.post('/generate-video', authenticateApiKey, (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
 
@@ -82,7 +110,7 @@ apiRouter.post('/generate-video', (req: Request, res: Response) => {
       message: 'Video generation job created successfully and queued for background rendering.',
     });
   } catch (err: any) {
-    console.error('[API] /generate-video error:', err);
+    logger.error('[API] /generate-video error:', err);
     res.status(500).json({
       error: err?.message || 'Failed to enqueue video generation job.',
     });
@@ -90,7 +118,7 @@ apiRouter.post('/generate-video', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Get Job Status Endpoint
+// 3. Get Job Status Endpoint (Public for Polling)
 // ---------------------------------------------------------------------------
 apiRouter.get('/job/:id', (req: Request, res: Response) => {
   const jobId = req.params.id;
@@ -106,7 +134,7 @@ apiRouter.get('/job/:id', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. List All Jobs Endpoint
+// 4. List All Jobs Endpoint (Public)
 // ---------------------------------------------------------------------------
 apiRouter.get('/jobs', (req: Request, res: Response) => {
   const jobs = jobStore.getAllJobs();
@@ -117,7 +145,7 @@ apiRouter.get('/jobs', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Video Media Download/Stream Asset Endpoint
+// 5. Video Media Download/Stream Asset Endpoint (Public)
 // ---------------------------------------------------------------------------
 apiRouter.get('/video/:id', (req: Request, res: Response) => {
   const rawId = req.params.id;
@@ -125,33 +153,45 @@ apiRouter.get('/video/:id', (req: Request, res: Response) => {
   const isDownload = req.query.download === 'true';
 
   const job = jobStore.getJob(jobId);
+  const mediaDir = path.join(process.cwd(), 'media');
+  const filePath = path.join(mediaDir, `${jobId}.mp4`);
 
-  // Return synthetic MP4 video file buffer if requested
-  const filename = `${job?.payload?.title || 'video_reel'}_${jobId}.mp4`.replace(/\s+/g, '_');
+  const downloadFilename = `${job?.payload?.title || 'video_reel'}_${jobId}.mp4`.replace(/\s+/g, '_');
 
-  if (isDownload) {
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  if (fs.existsSync(filePath)) {
+    if (isDownload) {
+      return res.download(filePath, downloadFilename);
+    }
+    return res.sendFile(filePath);
   }
-  res.setHeader('Content-Type', 'video/mp4');
 
-  // Provide a lightweight standard MP4 header/file placeholder
-  const dummyMp4Buffer = Buffer.from([
-    0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
-    0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32, 0x00, 0x00, 0x00, 0x08, 0x66, 0x72, 0x65, 0x65,
-  ]);
-
-  res.send(dummyMp4Buffer);
+  res.status(404).json({ error: `Video asset for job '${jobId}' was not found or is still rendering.` });
 });
 
 // ---------------------------------------------------------------------------
-// 6. OpenAPI Specifications JSON
+// 5b. Thumbnail Asset Endpoint (Public)
+// ---------------------------------------------------------------------------
+apiRouter.get('/thumbnail/:id', (req: Request, res: Response) => {
+  const rawId = req.params.id;
+  const mediaDir = path.join(process.cwd(), 'media');
+  const filePath = path.join(mediaDir, rawId);
+
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  }
+
+  res.status(404).json({ error: `Thumbnail '${rawId}' not found.` });
+});
+
+// ---------------------------------------------------------------------------
+// 6. OpenAPI Specifications JSON (Public)
 // ---------------------------------------------------------------------------
 apiRouter.get('/openapi.json', (req: Request, res: Response) => {
   res.json(openApiSpec);
 });
 
 // ---------------------------------------------------------------------------
-// 7. Interactive API Documentation Page (Swagger UI style HTML)
+// 7. Interactive API Documentation Page (Public)
 // ---------------------------------------------------------------------------
 apiRouter.get('/docs', (req: Request, res: Response) => {
   const html = `<!DOCTYPE html>
@@ -163,10 +203,10 @@ apiRouter.get('/docs', (req: Request, res: Response) => {
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
   <style>
     body { margin: 0; background-color: #0f172a; color: #f8fafc; font-family: sans-serif; }
-    .top-banner { background: #020617; border-b: 1px solid #1e293b; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .top-banner { background: #020617; border-bottom: 1px solid #1e293b; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     .top-banner h1 { margin: 0; font-size: 18px; color: #f59e0b; font-weight: bold; }
     .top-banner p { margin: 4px 0 0; font-size: 12px; color: #94a3b8; }
-    .badge { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 4px 10px; borderRadius: 20px; font-size: 11px; font-weight: bold; }
+    .badge { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: bold; }
     #swagger-ui { background: #fff; border-radius: 12px; margin: 20px; overflow: hidden; }
   </style>
 </head>
@@ -194,7 +234,7 @@ apiRouter.get('/docs', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 8. Model Context Protocol (MCP) Tools Catalog
+// 8. Model Context Protocol (MCP) Protocol Endpoint & REST Tools Catalog
 // ---------------------------------------------------------------------------
 apiRouter.get('/mcp/tools', (req: Request, res: Response) => {
   res.json({
@@ -202,10 +242,15 @@ apiRouter.get('/mcp/tools', (req: Request, res: Response) => {
   });
 });
 
+// JSON-RPC MCP Standard Protocol Endpoint
+apiRouter.post('/mcp', (req: Request, res: Response) => {
+  handleMcpJsonRpcRequest(req, res);
+});
+
 // ---------------------------------------------------------------------------
-// 9. Execute Model Context Protocol (MCP) Tool
+// 9. Execute Model Context Protocol (MCP) Tool (Protected)
 // ---------------------------------------------------------------------------
-apiRouter.post('/mcp/call', async (req: Request, res: Response) => {
+apiRouter.post('/mcp/call', authenticateApiKey, async (req: Request, res: Response) => {
   try {
     const { name, arguments: args, params } = req.body || {};
     const toolName = name || req.body?.method;
@@ -223,7 +268,7 @@ apiRouter.post('/mcp/call', async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. List Predefined Script Library
+// 10. List Predefined Script Library (Public)
 // ---------------------------------------------------------------------------
 apiRouter.get('/scripts', (req: Request, res: Response) => {
   const category = req.query.category as string | undefined;
@@ -238,7 +283,7 @@ apiRouter.get('/scripts', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 11. Text-To-Speech API (Gemini TTS)
+// 11. Text-To-Speech API (Gemini TTS) (Protected)
 // ---------------------------------------------------------------------------
 function addWavHeader(pcmBuffer: Buffer, sampleRate: number = 24000): Buffer {
   const numChannels = 1;
@@ -266,7 +311,7 @@ function addWavHeader(pcmBuffer: Buffer, sampleRate: number = 24000): Buffer {
   return Buffer.concat([header, pcmBuffer]);
 }
 
-apiRouter.post('/tts', async (req: Request, res: Response) => {
+apiRouter.post('/tts', authenticateApiKey, async (req: Request, res: Response) => {
   try {
     const { text, voice = 'Kore' } = req.body;
 

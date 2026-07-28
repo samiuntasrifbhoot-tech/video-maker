@@ -8,6 +8,9 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { apiRouter } from "./server/apiRouter";
+import { handleMcpJsonRpcRequest } from "./server/mcpServer";
+import { MCP_TOOLS_CATALOG } from "./server/mcpTools";
+import { errorHandler } from "./server/errorHandler";
 
 dotenv.config();
 
@@ -15,10 +18,19 @@ const app = express();
 const PORT = 3000;
 
 // Middleware to parse JSON payloads
-app.use(express.json());
+app.use(express.json({ limit: "20mb" }));
 
 // Mount Backend API Router (/api/*)
 app.use("/api", apiRouter);
+
+// Standard MCP Endpoints at root level for standard MCP client auto-discovery
+app.post("/mcp", handleMcpJsonRpcRequest);
+app.get("/mcp/tools", (req, res) => {
+  res.json({ tools: MCP_TOOLS_CATALOG });
+});
+
+// Mount Error Handling Middleware
+app.use(errorHandler);
 
 // Vite middleware & Static server setup
 async function startServer() {
