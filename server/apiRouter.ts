@@ -640,3 +640,10 @@ If the user's input is a general query or request for text, set shouldGenerateVi
   }
 });
 
+// Catch-all route for any unhandled /api/* paths to ensure JSON 404s are returned instead of SPA index.html
+apiRouter.use('*', (req: Request, res: Response) => {
+  res.status(404).json({
+    error: `API route '${req.originalUrl || req.path}' was not found.`,
+  });
+});
+

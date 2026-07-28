@@ -96,7 +96,13 @@ export default function AiChatPanel({ onImportScenes, isOpen, onClose }: AiChatP
         body: JSON.stringify({ message: textToSend }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = {};
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        throw new Error('Invalid response format from server');
+      }
 
       if (response.ok) {
         const aiMsgId = `ai-${Date.now()}`;
@@ -293,12 +299,13 @@ function VideoJobCard({
 
   // Poll video rendering job status from backend
   useEffect(() => {
-    if (job.status === 'completed' || job.status === 'failed') return;
+    if (!job.jobId || job.status === 'completed' || job.status === 'failed') return;
 
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/job/${job.jobId}`);
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const updated = await res.json();
           setJob((prev) => ({
             ...prev,
@@ -313,7 +320,7 @@ function VideoJobCard({
           }
         }
       } catch (e) {
-        console.error('Error polling job status:', e);
+        // Handle network or transient polling errors gracefully
       }
     }, 1500);
 
