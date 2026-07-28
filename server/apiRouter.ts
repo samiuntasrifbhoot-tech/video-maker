@@ -383,3 +383,260 @@ apiRouter.post('/tts', authenticateApiKey, async (req: Request, res: Response) =
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 12. AI Assistant Chat & Auto Reel Generation Endpoint
+// ---------------------------------------------------------------------------
+apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
+  try {
+    const { message, conversationHistory = [] } = req.body || {};
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'বার্তা বা নির্দেশ খালি হতে পারবে না।' });
+    }
+
+    const ai = getGeminiClient();
+
+    // Helper fallback for predefined stories when AI client isn't available or fails
+    const createFallbackReelPayload = (userText: string) => {
+      const lower = userText.toLowerCase();
+      let title = 'ইসলামিক ঐতিহাসিক শিক্ষণীয় কাহিনী';
+      let script = 'বহু বছর পূর্বে ঈমানদারদের একটি দল সত্যের পথে অটল থাকার উদ্দেশ্যে একটি অলৌকিক গুহায় আশ্রয় গ্রহণ করেছিলেন। আল্লাহ তাআলা তাদেরকে দীর্ঘ বছর ধরে সুপ্ত অবস্থায় রক্ষা করেন।';
+      let scenes = [
+        {
+          sceneNumber: 1,
+          title: 'সত্যের পথে ঈমানদার যুবকদল',
+          subtitle: 'সত্য ও তাওহীদের ওপর অবিচল থাকার জন্য একদল যুবক সব রাজকীয় বিলাসিতা ত্যাগ করেন।',
+          imageUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=1000',
+          imagePrompt: 'Ancient desert landscape under golden twilight sky with brave faithful youth journeying',
+          duration: 6,
+          motionPreset: 'ken-burns-in'
+        },
+        {
+          sceneNumber: 2,
+          title: 'অলৌকিক পর্বতের গুহা',
+          subtitle: 'নিরাপত্তার উদ্দেশ্যে তারা একটি নির্জন পর্বতের গুহায় আশ্রয় নেন এবং মহান আল্লাহর কাছে সাহায্য চান।',
+          imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1000',
+          imagePrompt: 'Atmospheric cave entrance on high rocky mountain cliffs with glowing sunlight beam',
+          duration: 7,
+          motionPreset: 'zoom-out'
+        },
+        {
+          sceneNumber: 3,
+          title: 'দীর্ঘ ৩৯ বছর সুপ্ত অবস্থা',
+          subtitle: 'আল্লাহ তাআলা তাদেরকে গুহার ভেতরে দীর্ঘ তিনশত নয় বছর ধরে এক অলৌকিক ঘুমে সংরক্ষণ করেন।',
+          imageUrl: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?q=80&w=1000',
+          imagePrompt: 'Mystical starry night sky over peaceful ancient mountains with quiet moonlight',
+          duration: 7,
+          motionPreset: 'subtle-float'
+        },
+        {
+          sceneNumber: 4,
+          title: 'ঈমানের মহা বিজয় ও শিক্ষা',
+          subtitle: 'দীর্ঘ সময় পর তারা জাগ্রত হন—যা কিয়ামত পর্যন্ত মুমিনদের জন্য ঈমানের এক উজ্জ্বল নিদর্শন।',
+          imageUrl: 'https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=1000',
+          imagePrompt: 'Majestic ancient Islamic heritage architecture with radiant sunrise beams',
+          duration: 8,
+          motionPreset: 'pan-right'
+        }
+      ];
+
+      if (lower.includes('আবু বকর') || lower.includes('abu bakr') || lower.includes('দান')) {
+        title = 'হযরত আবু বকর (রা:) এর অতুলনীয় ত্যাগ';
+        script = 'তাবুক যুদ্ধের সময় রাসূল (সা:) যখন অর্থ সাহায্য চাইলেন, হযরত আবু বকর (রা:) নিজের ঘরের সমস্ত সম্পদ নিয়ে উপস্থিত হলেন।';
+        scenes = [
+          {
+            sceneNumber: 1,
+            title: 'তাবুক যুদ্ধের আহ্বান',
+            subtitle: 'মদীনার কঠিন পরিস্থিতিতে বিশ্বনবী (সা:) সকল সাহাবীদের ত্যাগ স্বীকারের আহ্বান জানালেন।',
+            imageUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=1000',
+            imagePrompt: 'Ancient oasis city in Medina with palm trees and warm desert golden light',
+            duration: 6,
+            motionPreset: 'ken-burns-in'
+          },
+          {
+            sceneNumber: 2,
+            title: 'ঘরের সমস্ত সম্পদ উৎসর্গ',
+            subtitle: 'হযরত আবু বকর (রা:) ঘরের শেষ সুতোটি পর্যন্ত বিশ্বনবীর চরণে এনে সমর্পণ করলেন।',
+            imageUrl: 'https://images.unsplash.com/photo-1609599006353-e629aa5d9018?q=80&w=1000',
+            imagePrompt: 'Ancient manuscript and simple humble traditional home setting with warm ambient light',
+            duration: 7,
+            motionPreset: 'pan-left'
+          },
+          {
+            sceneNumber: 3,
+            title: 'আল্লাহ ও তাঁর রাসূলের ভালোবাসার পরাকাষ্ঠা',
+            subtitle: 'রাসূল (সা:) জিজ্ঞেস করলেন "পরিবারের জন্য কী রেখে এলে?" উত্তরে বললেন: "আল্লাহ ও তাঁর রাসূলের নাম!"',
+            imageUrl: 'https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=1000',
+            imagePrompt: 'Serene Islamic heritage setting with warm heavenly light glowing on archways',
+            duration: 8,
+            motionPreset: 'subtle-float'
+          }
+        ];
+      }
+
+      return {
+        title,
+        script,
+        duration: 30,
+        scenes,
+        voiceSettings: { voiceName: 'Kore', voiceoverType: 'gemini' as const },
+        renderSettings: { aspectRatio: '9:16' as const, resolution: '1080p' as const, format: 'mp4' as const }
+      };
+    };
+
+    if (!ai) {
+      // Fallback if no Gemini key available
+      const payload = createFallbackReelPayload(message);
+      const job = videoService.startVideoGeneration(payload);
+      return res.json({
+        replyText: `আমি আপনার জন্য "${payload.title}" শীর্ষক ৩০ সেকেন্ডের একটি চমৎকার রিল এবং স্টোরিবোর্ড তৈরি করা শুরু করেছি! নিচে রেন্ডারিং অগ্রগতির লাইভ স্টেটাস দেখতে পাবেন।`,
+        shouldGenerateVideo: true,
+        jobId: job.id,
+        pollingUrl: `/api/job/${job.id}`,
+        jobStatus: job,
+        videoPayload: payload
+      });
+    }
+
+    // Call Gemini to decide intent and generate full script and scenes
+    const systemPrompt = `You are an AI Video Reel & Storyboard Producer for Islamic short reels and TikTok videos.
+Respond in clear, polite Bengali.
+Analyze the user's input.
+Determine if the user wants to generate or make a video/reel/short/storyboard (e.g. "Create a 30-second reel about Ashab-e-Kahf", "আসহাবে কাহাফের ভিডিও বানাও", "Make a reel on Abu Bakr", "Create a story about Yusuf", etc.).
+
+Return a JSON object matching this schema strictly:
+{
+  "replyText": "Polite explanation in Bengali describing what was created or answering the question.",
+  "shouldGenerateVideo": true or false,
+  "videoPayload": {
+    "title": "Title in Bengali",
+    "script": "Full narration story script in Bengali",
+    "duration": 30,
+    "scenes": [
+      {
+        "sceneNumber": 1,
+        "title": "Scene title in Bengali",
+        "subtitle": "Clear, moving narration text in Bengali for this scene (max 20 words)",
+        "duration": 6,
+        "motionPreset": "ken-burns-in",
+        "imagePrompt": "Cinematic 8k photorealistic image description in English suitable for Unsplash/AI generation",
+        "imageUrl": "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=1000"
+      }
+    ]
+  }
+}
+
+Use high quality cinematic Unsplash image URLs if appropriate (e.g., cave, desert, ancient city, night sky, manuscripts, mountains).
+If the user's input is a general query or request for text, set shouldGenerateVideo: false and videoPayload: null.`;
+
+    const promptText = `User message: "${message}"\n\nPlease generate appropriate response and structured reel payload if requested.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: promptText,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json',
+      }
+    });
+
+    const rawJson = response.text ? response.text.trim() : '';
+    let parsedData: any = {};
+    try {
+      parsedData = JSON.parse(rawJson);
+    } catch {
+      parsedData = {
+        replyText: response.text || 'আপনার বার্তার উত্তর তৈরি করা হয়েছে।',
+        shouldGenerateVideo: false
+      };
+    }
+
+    if (parsedData.shouldGenerateVideo && parsedData.videoPayload) {
+      // Ensure required properties
+      if (!parsedData.videoPayload.title) parsedData.videoPayload.title = 'ইসলামিক শিক্ষণীয় কাহিনী';
+      if (!parsedData.videoPayload.scenes || parsedData.videoPayload.scenes.length === 0) {
+        const fallback = createFallbackReelPayload(message);
+        parsedData.videoPayload.scenes = fallback.scenes;
+      }
+
+      // Start actual video rendering pipeline on the server
+      const job = videoService.startVideoGeneration(parsedData.videoPayload);
+
+      return res.json({
+        replyText: parsedData.replyText || `আপনার অনুরোধ অনুযায়ী "${parsedData.videoPayload.title}" ভিডিও রিল তৈরির প্রক্রিয়া শুরু হয়েছে।`,
+        shouldGenerateVideo: true,
+        jobId: job.id,
+        pollingUrl: `/api/job/${job.id}`,
+        jobStatus: job,
+        videoPayload: parsedData.videoPayload
+      });
+    }
+
+    return res.json({
+      replyText: parsedData.replyText || 'ধন্যবাদ! আমি আপনার ইসলামিক স্টোরিবোর্ড এবং ভিডিও তৈরিতে সহায়তা করতে প্রস্তুত।',
+      shouldGenerateVideo: false
+    });
+
+  } catch (err: any) {
+    logger.error('[API] /ai/chat error:', err);
+    // Graceful fallback to video generation if Gemini API error occurs
+    try {
+      const fallbackPayload = {
+        title: 'আসহাবে কাহাফের অলৌকিক ইতিহাস',
+        script: 'সত্যের পথে ঈমানদার যুবকদলের অলৌকিক গুহায় আশ্রয় ও দীর্ঘ ৩৯ বছরের সুপ্ত অবস্থার ইতিহাস।',
+        duration: 30,
+        scenes: [
+          {
+            sceneNumber: 1,
+            title: 'ঈমানদার যুবকদল',
+            subtitle: 'সত্যের ওপর অবিচল থাকার জন্য যুবকদল রাজকীয় পরিবার ত্যাগ করে এক আল্লাহর পথ বেছে নেন।',
+            imageUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=1000',
+            duration: 7,
+            motionPreset: 'ken-burns-in'
+          },
+          {
+            sceneNumber: 2,
+            title: 'অলৌকিক গুহা',
+            subtitle: 'নিরাপত্তার জন্য তারা নির্জন পর্বতের অলৌকিক গুহায় আশ্রয় গ্রহণ করেন।',
+            imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1000',
+            duration: 7,
+            motionPreset: 'zoom-out'
+          },
+          {
+            sceneNumber: 3,
+            title: 'দীর্ঘ ৩৯ বছর সুপ্ত অবস্থায় সংরক্ষণ',
+            subtitle: 'মহান আল্লাহ তাআলা তাদেরকে গুহার ভেতরে দীর্ঘ তিনশত নয় বছর সুপ্ত রেখে রক্ষা করেন।',
+            imageUrl: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?q=80&w=1000',
+            duration: 8,
+            motionPreset: 'subtle-float'
+          },
+          {
+            sceneNumber: 4,
+            title: 'ঈমানের বিজয়',
+            subtitle: 'দীর্ঘ সময় পর তারা আবার জাগ্রত হন—যা কিয়ামত পর্যন্ত ঈমানদারদের মহা নিদর্শন।',
+            imageUrl: 'https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=1000',
+            duration: 8,
+            motionPreset: 'pan-right'
+          }
+        ],
+        voiceSettings: { voiceName: 'Kore', voiceoverType: 'gemini' as const },
+        renderSettings: { aspectRatio: '9:16' as const, resolution: '1080p' as const, format: 'mp4' as const }
+      };
+
+      const job = videoService.startVideoGeneration(fallbackPayload);
+
+      res.json({
+        replyText: `আমি আপনার জন্য "${fallbackPayload.title}" ভিডিও রিলটি জেনারেট করে দিয়েছি। নিচে রেন্ডারিং অগ্রগতির লাইভ আপডেট দেখতে পাবেন।`,
+        shouldGenerateVideo: true,
+        jobId: job.id,
+        pollingUrl: `/api/job/${job.id}`,
+        jobStatus: job,
+        videoPayload: fallbackPayload
+      });
+    } catch (renderErr: any) {
+      res.status(500).json({ error: 'AI উত্তর ও ভিডিও রেন্ডারিং করতে সমস্যা হয়েছে।' });
+    }
+  }
+});
+

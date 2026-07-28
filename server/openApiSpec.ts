@@ -309,6 +309,34 @@ export const openApiSpec = {
         },
       },
     },
+    "/api/ai/chat": {
+      post: {
+        tags: ["AI Assistant"],
+        summary: "AI Chat & Automatic Reel Generation",
+        description: "Generates Islamic story scripts, splits scenes, generates TTS, and renders video reels based on user natural language prompts.",
+        operationId: "aiChatAndReelGenerator",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["message"],
+                properties: {
+                  message: { type: "string", description: "User prompt (e.g., 'Create a 30-second reel about Ashab-e-Kahf')" },
+                  conversationHistory: { type: "array", items: { type: "object" } }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          "200": {
+            description: "AI chat response with optional video generation job details"
+          }
+        }
+      }
+    },
   },
   components: {
     securitySchemes: {
