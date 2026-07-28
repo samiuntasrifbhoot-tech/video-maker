@@ -33,9 +33,13 @@ app.use(express.json({ limit: "20mb" }));
 
 // OpenAI ChatGPT Plugin Discovery Endpoint
 app.get("/.well-known/ai-plugin.json", (req, res) => {
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost:3000";
+  const baseUrl = `${protocol}://${host}`;
+
   res.json({
     schema_version: "v1",
-    name_for_human: "AI Video & Reel Generator",
+    name_for_human: "AI Video Generator",
     name_for_model: "ai_video_generator",
     description_for_human: "Generate video reels, storyboards, and Bengali Islamic stories with voiceovers.",
     description_for_model: "Plugin for generating AI video reels and storyboards asynchronously. Supports scene creation, Gemini TTS voiceover, and direct MP4 rendering.",
@@ -44,16 +48,19 @@ app.get("/.well-known/ai-plugin.json", (req, res) => {
     },
     api: {
       type: "openapi",
-      url: "/api/openapi.json"
+      url: `${baseUrl}/api/openapi.json`
     },
-    logo_url: "https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=128",
+    logo_url: `${baseUrl}/public/icon-192.png`,
     contact_email: "support@aistudio.build",
-    legal_info_url: "/api/docs"
+    legal_info_url: `${baseUrl}/api/docs`
   });
 });
 
 // Mount Backend API Router (/api/*)
 app.use("/api", apiRouter);
+
+// Serve public directory for static assets (icons, manifest)
+app.use("/public", express.static(path.join(process.cwd(), "public")));
 
 // Standard MCP Endpoints at root level for standard MCP client auto-discovery
 app.post("/mcp", handleMcpJsonRpcRequest);

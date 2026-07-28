@@ -58,6 +58,53 @@ export default function SceneEditor({
   // Sequence Reordering Modal State
   const [isSeqModalOpen, setIsSeqModalOpen] = useState(false);
   const [rawFilesForSeq, setRawFilesForSeq] = useState<File[] | undefined>(undefined);
+  const [isGeneratingSingleVoice, setIsGeneratingSingleVoice] = useState(false);
+
+  // Generate Gemini TTS AI voice for only current single scene
+  const handleGenerateSingleSceneAiVoice = async () => {
+    if (!currentScene.subtitle || !currentScene.subtitle.trim()) {
+      alert('অনুগ্রহ করে এই দৃশ্যের সাবটাইটেল বা বাংলা টেক্সট লিখুন।');
+      return;
+    }
+
+    setIsGeneratingSingleVoice(true);
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: currentScene.subtitle, voice: 'Kore' }),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.base64Audio) {
+        const binary = atob(data.base64Audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const cleanMime = (data.mimeType || 'audio/wav').split(';')[0].trim();
+        const blob = new Blob([bytes], { type: cleanMime });
+        const localUrl = URL.createObjectURL(blob);
+
+        const tempAudio = new Audio(localUrl);
+        tempAudio.onloadedmetadata = () => {
+          const autoDur = Math.max(currentScene.duration, Math.ceil(tempAudio.duration));
+          updateCurrentScene({
+            voiceoverAudioUrl: localUrl,
+            voiceoverAudioName: `Gemini_AI_Scene_${currentScene.sceneNumber}.wav`,
+            duration: autoDur,
+          });
+        };
+      } else {
+        alert(data.error || 'এই দৃশ্যের AI ভয়েস জেনারেট করা সম্ভব হয়নি।');
+      }
+    } catch (err) {
+      console.error('Single scene TTS failed:', err);
+      alert('ভয়েস জেনারেট করতে সমস্যা হয়েছে।');
+    } finally {
+      setIsGeneratingSingleVoice(false);
+    }
+  };
 
   // Update current scene fields
   const updateCurrentScene = (updates: Partial<Scene>) => {
@@ -560,7 +607,7 @@ export default function SceneEditor({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input
                 type="file"
                 ref={sceneAudioInputRef}
@@ -590,6 +637,17 @@ export default function SceneEditor({
                 <Mic className="w-3.5 h-3.5 text-amber-500" />
                 {currentScene.voiceoverAudioName ? 'ভয়েস ফাইল পরিবর্তন করুন' : 'এই দৃশ্যের নিজস্ব ভয়েস ফাইল আপলোড করুন'}
               </button>
+              
+              <button
+                type="button"
+                onClick={handleGenerateSingleSceneAiVoice}
+                disabled={isGeneratingSingleVoice}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-sans font-bold rounded-xl border border-amber-500/30 cursor-pointer transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                {isGeneratingSingleVoice ? 'ভয়েস তৈরি হচ্ছে...' : 'শুধুমাত্র এই দৃশ্যের AI ভয়েস বানান'}
+              </button>
+
               {currentScene.voiceoverAudioUrl && (
                 <button
                   type="button"
