@@ -17,8 +17,40 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// CORS Middleware for external AI clients (ChatGPT, Claude, Gemini, Kimi)
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-Request-ID");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // Middleware to parse JSON payloads
 app.use(express.json({ limit: "20mb" }));
+
+// OpenAI ChatGPT Plugin Discovery Endpoint
+app.get("/.well-known/ai-plugin.json", (req, res) => {
+  res.json({
+    schema_version: "v1",
+    name_for_human: "AI Video & Reel Generator",
+    name_for_model: "ai_video_generator",
+    description_for_human: "Generate video reels, storyboards, and Bengali Islamic stories with voiceovers.",
+    description_for_model: "Plugin for generating AI video reels and storyboards asynchronously. Supports scene creation, Gemini TTS voiceover, and direct MP4 rendering.",
+    auth: {
+      type: "none"
+    },
+    api: {
+      type: "openapi",
+      url: "/api/openapi.json"
+    },
+    logo_url: "https://images.unsplash.com/photo-1542831371-29b0f74f9713?w=128",
+    contact_email: "support@aistudio.build",
+    legal_info_url: "/api/docs"
+  });
+});
 
 // Mount Backend API Router (/api/*)
 app.use("/api", apiRouter);
