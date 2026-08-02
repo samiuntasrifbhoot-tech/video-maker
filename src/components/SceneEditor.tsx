@@ -22,10 +22,14 @@ import {
   ArrowUpDown,
   Mic,
   ListOrdered,
+  Image as ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import { Scene, MotionPreset } from '../types';
 import ImageSequenceModal from './ImageSequenceModal';
 import AccordionSection from './AccordionSection';
+import BackgroundLibraryModal from './BackgroundLibraryModal';
+import { matchBestBackgroundImage } from '../data/backgroundImageLibrary';
 
 interface SceneEditorProps {
   scenes: Scene[];
@@ -58,8 +62,55 @@ export default function SceneEditor({
 
   // Sequence Reordering Modal State
   const [isSeqModalOpen, setIsSeqModalOpen] = useState(false);
+  const [isBgLibraryOpen, setIsBgLibraryOpen] = useState(false);
   const [rawFilesForSeq, setRawFilesForSeq] = useState<File[] | undefined>(undefined);
   const [isGeneratingSingleVoice, setIsGeneratingSingleVoice] = useState(false);
+  const [isGeneratingNanoImage, setIsGeneratingNanoImage] = useState(false);
+
+  // Generate AI Image via Nano Banana / Imagen 3
+  const handleGenerateNanoBananaImage = async () => {
+    setIsGeneratingNanoImage(true);
+    try {
+      const promptText = currentScene.imagePrompt || `${currentScene.title}: ${currentScene.subtitle}`;
+      const res = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptText,
+          aspectRatio: '9:16',
+        }),
+      });
+      const data = await res.json();
+      if (data.imageUrl) {
+        updateCurrentScene({ imageUrl: data.imageUrl, isCustomImage: true });
+      }
+    } catch (err) {
+      console.error('Error generating Nano Banana image:', err);
+    } finally {
+      setIsGeneratingNanoImage(false);
+    }
+  };
+
+  // Auto-match HD background for current scene
+  const handleAutoMatchCurrentSceneBg = () => {
+    const textToMatch = `${currentScene.title} ${currentScene.subtitle}`;
+    const bestUrl = matchBestBackgroundImage(textToMatch);
+    updateCurrentScene({ imageUrl: bestUrl, isCustomImage: false });
+  };
+
+  // Auto-match HD backgrounds for ALL scenes
+  const handleAutoMatchAllScenesBg = () => {
+    setScenes((prev) =>
+      prev.map((s) => {
+        const textToMatch = `${s.title} ${s.subtitle}`;
+        return {
+          ...s,
+          imageUrl: matchBestBackgroundImage(textToMatch),
+          isCustomImage: false,
+        };
+      })
+    );
+  };
 
   // Generate Gemini TTS AI voice for only current single scene
   const handleGenerateSingleSceneAiVoice = async () => {
@@ -525,7 +576,7 @@ export default function SceneEditor({
           title="ভিডিও সাবটাইটেল ও স্ক্রিপ্ট এডিটর"
           subtitle="দৃশ্যের বাংলা ক্যাপশন ও বিষয়বস্তু লিখুন"
           icon={<Film className="w-4 h-4 text-amber-500" />}
-          defaultOpen={true}
+          defaultOpen={false}
         >
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -561,7 +612,7 @@ export default function SceneEditor({
           subtitle="ছবিতে ধীরে ধীরে জুম বা প্যানিং অ্যানিমেশন যোগ করুন"
           icon={<Video className="w-4 h-4 text-amber-500" />}
           badge={currentScene.motionPreset}
-          defaultOpen={true}
+          defaultOpen={false}
         >
           <div className="flex flex-col gap-2">
             <label className="text-xs font-sans text-slate-400 font-semibold flex items-center gap-1">
@@ -600,7 +651,7 @@ export default function SceneEditor({
           subtitle="শুধুমাত্র বর্তমান দৃশ্যের জন্য আলাদা AI ভয়েস বা অডিও তৈরি করুন"
           icon={<Mic className="w-4 h-4 text-amber-500" />}
           badge={currentScene.voiceoverAudioName ? 'অডিও সংযুক্ত' : 'AI ভয়েস'}
-          defaultOpen={true}
+          defaultOpen={false}
         >
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
@@ -675,70 +726,125 @@ export default function SceneEditor({
 
         {/* SECTION 4: Single Scene Image Replace & Duration */}
         <AccordionSection
-          title="ছবি পরিবর্তন ও সময়কাল (Duration)"
-          subtitle="ছবি সিলেক্ট করুন অথবা কত সেকেন্ড থাকবে তা সেট করুন"
+          title="ছবি পরিবর্তন, HD গ্যালারি ও সময়কাল (Duration)"
+          subtitle="HD ব্যাকগ্রাউন্ড গ্যালারি থেকে ছবি সিলেক্ট করুন, ফাইল আপলোড করুন অথবা সময়কাল সেট করুন"
           icon={<Clock className="w-4 h-4 text-amber-500" />}
           badge={`${currentScene.duration}s`}
           defaultOpen={false}
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Change Single Image */}
-            <div className="flex flex-col gap-1.5 justify-between bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
-              <label className="text-xs font-sans text-slate-300 font-bold">
-                ছবি পরিবর্তন:
-              </label>
-              <input
-                type="file"
-                ref={singleFileInputRef}
-                onChange={handleSingleImageChange}
-                accept="image/*"
-                className="hidden"
-              />
+          <div className="flex flex-col gap-3">
+            {/* 2x2 Grid of Image Options */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+              {/* Option 1: Nano Banana AI Generate */}
               <button
                 type="button"
-                onClick={() => singleFileInputRef.current?.click()}
-                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-100 text-xs font-sans font-bold rounded-xl border border-slate-700 cursor-pointer transition-colors shadow-sm"
+                onClick={handleGenerateNanoBananaImage}
+                disabled={isGeneratingNanoImage}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 text-xs font-sans font-extrabold rounded-xl shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
               >
-                <Upload className="w-3.5 h-3.5 text-amber-500" />
-                নতুন ছবি সিলেক্ট করুন
+                {isGeneratingNanoImage ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>ন্যানো ব্যানানা AI ছবি তৈরি হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 fill-current" />
+                    <span>🍌 ন্যানো ব্যানানা AI ছবি জেনারেট</span>
+                  </>
+                )}
+              </button>
+
+              {/* Option 2: HD Background Gallery */}
+              <button
+                type="button"
+                onClick={() => setIsBgLibraryOpen(true)}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-sans font-bold rounded-xl border border-slate-700 transition-all cursor-pointer"
+              >
+                <ImageIcon className="w-4 h-4 text-amber-400" />
+                <span>HD ব্যাকগ্রাউন্ড গ্যালারি</span>
+              </button>
+
+              {/* Option 3: Auto-Match Current Scene */}
+              <button
+                type="button"
+                onClick={handleAutoMatchCurrentSceneBg}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-sans font-bold rounded-xl border border-amber-500/30 transition-all cursor-pointer"
+                title="লেখার সাথে মিল রেখে অটোমেটিক সেরা ব্যাকগ্রাউন্ড সেট করুন"
+              >
+                <span>🎯 অটো-ম্যাচ ব্যাকগ্রাউন্ড</span>
+              </button>
+
+              {/* Option 4: Auto-Match All Scenes */}
+              <button
+                type="button"
+                onClick={handleAutoMatchAllScenesBg}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-sans font-bold rounded-xl border border-slate-700 transition-all cursor-pointer"
+                title="সব দৃশ্যগুলোতে অটো-ম্যাচ ছবি সেট করুন"
+              >
+                <span>⚡ সব দৃশ্যে অটো-ম্যাচ</span>
               </button>
             </div>
 
-            {/* Single Scene Duration Option */}
-            <div className="flex flex-col gap-1.5 bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-sans text-slate-300 font-bold flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-amber-500" />
-                  ছবির সময়কাল (Duration):
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Custom Image File Upload */}
+              <div className="flex flex-col gap-1.5 justify-between bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
+                <label className="text-xs font-sans text-slate-300 font-bold">
+                  নিজের ডিভাইস থেকে ফাইল আপলোড:
                 </label>
-                <span className="text-xs font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-amber-500/20">
-                  {currentScene.duration}s
-                </span>
+                <input
+                  type="file"
+                  ref={singleFileInputRef}
+                  onChange={handleSingleImageChange}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => singleFileInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-100 text-xs font-sans font-bold rounded-xl border border-slate-700 cursor-pointer transition-colors shadow-sm"
+                >
+                  <Upload className="w-3.5 h-3.5 text-amber-500" />
+                  গ্যালারি / ডিভাইস থেকে ছবি দিন
+                </button>
               </div>
-              <input
-                type="range"
-                min="1"
-                max="20"
-                step="0.5"
-                value={currentScene.duration}
-                onChange={(e) => updateCurrentScene({ duration: parseFloat(e.target.value) })}
-                className="w-full accent-amber-500 h-1.5 bg-slate-950 rounded-lg cursor-pointer my-1"
-              />
-              <div className="flex gap-1 justify-between">
-                {[2, 3.5, 5, 8, 10].map((sec) => (
-                  <button
-                    key={sec}
-                    type="button"
-                    onClick={() => updateCurrentScene({ duration: sec })}
-                    className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded cursor-pointer transition-colors ${
-                      currentScene.duration === sec
-                        ? 'bg-amber-500 text-slate-950 font-extrabold shadow'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700'
-                    }`}
-                  >
-                    {sec}s
-                  </button>
-                ))}
+
+              {/* Single Scene Duration Option */}
+              <div className="flex flex-col gap-1.5 bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-sans text-slate-300 font-bold flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    ছবির সময়কাল (Duration):
+                  </label>
+                  <span className="text-xs font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-amber-500/20">
+                    {currentScene.duration}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  step="0.5"
+                  value={currentScene.duration}
+                  onChange={(e) => updateCurrentScene({ duration: parseFloat(e.target.value) })}
+                  className="w-full accent-amber-500 h-1.5 bg-slate-950 rounded-lg cursor-pointer my-1"
+                />
+                <div className="flex gap-1 justify-between">
+                  {[2, 3.5, 5, 8, 10].map((sec) => (
+                    <button
+                      key={sec}
+                      type="button"
+                      onClick={() => updateCurrentScene({ duration: sec })}
+                      className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded cursor-pointer transition-colors ${
+                        currentScene.duration === sec
+                          ? 'bg-amber-500 text-slate-950 font-extrabold shadow'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700'
+                      }`}
+                    >
+                      {sec}s
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -758,6 +864,19 @@ export default function SceneEditor({
         onConfirmSceneSequence={(orderedScenes) => {
           setScenes(orderedScenes);
           setCurrentSceneIndex(0);
+        }}
+      />
+
+      {/* Background HD Image Library Modal */}
+      <BackgroundLibraryModal
+        isOpen={isBgLibraryOpen}
+        onClose={() => setIsBgLibraryOpen(false)}
+        currentImageUrl={currentScene.imageUrl}
+        onSelectImage={(url) => {
+          updateCurrentScene({ imageUrl: url, isCustomImage: false });
+        }}
+        onApplyToAllScenes={(url) => {
+          setScenes((prev) => prev.map((s) => ({ ...s, imageUrl: url, isCustomImage: false })));
         }}
       />
     </div>

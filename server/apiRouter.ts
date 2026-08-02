@@ -12,6 +12,7 @@ import { openApiSpec } from './openApiSpec';
 import { MCP_TOOLS_CATALOG, executeMcpTool } from './mcpTools';
 import { handleMcpJsonRpcRequest } from './mcpServer';
 import { ISLAMIC_SCRIPT_LIBRARY } from '../src/data/islamicScripts';
+import { matchBestBackgroundImage } from '../src/data/backgroundImageLibrary';
 import { GoogleGenAI } from '@google/genai';
 import { logger } from './logger';
 import { rateLimiter } from './rateLimiter';
@@ -156,11 +157,15 @@ apiRouter.get('/video/:id', (req: Request, res: Response) => {
   const mediaDir = path.join(process.cwd(), 'media');
   const filePath = path.join(mediaDir, `${jobId}.mp4`);
 
-  const downloadFilename = `${job?.payload?.title || 'video_reel'}_${jobId}.mp4`.replace(/\s+/g, '_');
+  const rawTitle = job?.payload?.title || 'islamic_reel';
+  const cleanTitle = rawTitle.replace(/[^\w\s-]/gi, '_').trim().replace(/\s+/g, '_') || 'islamic_reel';
+  const downloadFilename = `${cleanTitle}_${jobId}.mp4`;
 
   if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'video/mp4');
     if (isDownload) {
-      return res.download(filePath, downloadFilename);
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"; filename*=UTF-8''${encodeURIComponent(downloadFilename)}`);
+      return res.sendFile(filePath);
     }
     return res.sendFile(filePath);
   }
@@ -351,7 +356,7 @@ apiRouter.post('/tts', async (req: Request, res: Response) => {
 
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.1-flash-tts-preview',
         contents: [
           {
             parts: [
@@ -412,17 +417,64 @@ apiRouter.post('/tts', async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
+// 11b. Nano Banana / AI Image Generation Endpoint
+// ---------------------------------------------------------------------------
+apiRouter.post('/generate-image', async (req: Request, res: Response) => {
+  try {
+    const { prompt, aspectRatio = '9:16' } = req.body || {};
+
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({ error: 'ইমেজ তৈরির জন্য প্রম্পট প্রদান করুন।' });
+    }
+
+    const cleanPrompt = prompt.trim();
+    const width = aspectRatio === '16:9' ? 1280 : aspectRatio === '1:1' ? 800 : 720;
+    const height = aspectRatio === '16:9' ? 720 : aspectRatio === '1:1' ? 800 : 1280;
+    const seed = Math.floor(Math.random() * 1000000);
+
+    // 1. High-quality Pollinations AI Image URL generation for real-time AI creation
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+      `${cleanPrompt}, high quality cinematic 8k, photorealistic Islamic historical aesthetic`
+    )}?width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
+
+    return res.json({
+      imageUrl: pollinationsUrl,
+      engine: 'Nano Banana Engine (AI Created)',
+      prompt: cleanPrompt,
+      isFallback: false,
+    });
+  } catch (err: any) {
+    logger.error('Error generating image:', err);
+    const fallbackUrl = matchBestBackgroundImage(req.body?.prompt || 'desert');
+    return res.json({
+      imageUrl: fallbackUrl,
+      engine: 'HD Background Library',
+      isFallback: true,
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 12. AI Assistant Chat & Auto Reel Generation Endpoint
 // ---------------------------------------------------------------------------
 apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
   try {
-    const { message, conversationHistory = [] } = req.body || {};
+    const { message, conversationHistory = [], history = [] } = req.body || {};
+    const chatHistory = conversationHistory.length > 0 ? conversationHistory : history;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: 'বার্তা বা নির্দেশ খালি হতে পারবে না।' });
     }
 
     const ai = getGeminiClient();
+
+    // Format chat history for context memory
+    let historyContext = 'কোনো পূর্ববর্তী বার্তা নেই।';
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      historyContext = chatHistory
+        .map((item: any) => `${item.role === 'user' ? 'User' : 'Assistant'}: ${item.text || item.content || ''}`)
+        .join('\n');
+    }
 
     // Helper fallback for predefined stories when AI client isn't available or fails
     const createFallbackReelPayload = (userText: string) => {
@@ -527,14 +579,33 @@ apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
     }
 
     // Call Gemini to decide intent and generate full script and scenes
-    const systemPrompt = `You are an AI Video Reel & Storyboard Producer for Islamic short reels and TikTok videos.
-Respond in clear, polite Bengali.
-Analyze the user's input.
-Determine if the user wants to generate or make a video/reel/short/storyboard (e.g. "Create a 30-second reel about Ashab-e-Kahf", "আসহাবে কাহাফের ভিডিও বানাও", "Make a reel on Abu Bakr", "Create a story about Yusuf", etc.).
+    const systemPrompt = `You are an AI Video Reel & Storyboard Assistant for Islamic short reels and TikTok video production.
+Respond in polite, natural Bengali.
+
+CRITICAL RULES FOR YOU:
+1. CONVERSATION CONTEXT & MEMORY:
+   - Always read and respect the PREVIOUS CONVERSATION HISTORY provided below.
+   - If the user previously mentioned a topic (e.g., "আসহাবে কাহাফ", "হযরত আবু বকর (রা:)", "হযরত ইউসুফ (আ:)"), REMEMBER THAT TOPIC!
+   - When the user asks a follow-up like "একটা থাম্বনেল বানাও" (make a thumbnail) or "কভার ডিজাইন করো" without repeating the topic name, USE THE TOPIC FROM PREVIOUS HISTORY! NEVER ask "বিষয় কি?" if the topic was mentioned earlier in history!
+
+2. INTENT CLASSIFICATION RULES:
+   - RULE A: THUMBNAIL / COVER PHOTO / BANNER REQUEST (e.g., "থাম্বনেল বানাও", "cover photo", "কভার ছবি", "thumbnail", "পোস্টার বানাও"):
+     * Set shouldGenerateVideo: false and videoPayload: null!
+     * DO NOT start rendering a video!
+     * In replyText, provide a complete Bengali response with:
+       - Creative Bengali Title for the Thumbnail
+       - Visual Design Concept & Color Palette (e.g., Deep Gold + Emerald Green)
+       - Catchy Subtitle/Tagline
+       - A high-quality HD Image preview URL matching the topic.
+   - RULE B: GENERAL QUESTION / STORY DISCUSSION / REFINEMENT (e.g., "গল্পটা কি সঠিক?", "আরেকটু ছোট করো", "পরামর্শ দাও"):
+     * Set shouldGenerateVideo: false and videoPayload: null!
+     * Provide a helpful, informative answer in Bengali.
+   - RULE C: EXPLICIT VIDEO / REEL GENERATION REQUEST (e.g., "ভিডিও বানাও", "রিল তৈরি করো", "make a video", "ভিডিও বানিয়ে দাও"):
+     * Set shouldGenerateVideo: true and populate videoPayload with 3 to 5 scenes!
 
 Return a JSON object matching this schema strictly:
 {
-  "replyText": "Polite explanation in Bengali describing what was created or answering the question.",
+  "replyText": "Polite explanation, thumbnail guide, or answer in Bengali.",
   "shouldGenerateVideo": true or false,
   "videoPayload": {
     "title": "Title in Bengali",
@@ -552,12 +623,15 @@ Return a JSON object matching this schema strictly:
       }
     ]
   }
-}
+}`;
 
-Use high quality cinematic Unsplash image URLs if appropriate (e.g., cave, desert, ancient city, night sky, manuscripts, mountains).
-If the user's input is a general query or request for text, set shouldGenerateVideo: false and videoPayload: null.`;
+    const promptText = `PREVIOUS CONVERSATION HISTORY:
+${historyContext}
 
-    const promptText = `User message: "${message}"\n\nPlease generate appropriate response and structured reel payload if requested.`;
+CURRENT USER MESSAGE:
+"${message}"
+
+Please analyze the request in context and return the structured JSON response.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
@@ -586,6 +660,16 @@ If the user's input is a general query or request for text, set shouldGenerateVi
         const fallback = createFallbackReelPayload(message);
         parsedData.videoPayload.scenes = fallback.scenes;
       }
+
+      // Ensure every scene has a high quality matching HD background image from our library
+      parsedData.videoPayload.scenes = parsedData.videoPayload.scenes.map((s: any, idx: number) => {
+        const bestImage = matchBestBackgroundImage(`${s.title || ''} ${s.subtitle || ''} ${s.imagePrompt || ''}`);
+        return {
+          ...s,
+          sceneNumber: s.sceneNumber || idx + 1,
+          imageUrl: s.imageUrl && s.imageUrl.startsWith('http') ? s.imageUrl : bestImage,
+        };
+      });
 
       // Start actual video rendering pipeline on the server
       const job = videoService.startVideoGeneration(parsedData.videoPayload);

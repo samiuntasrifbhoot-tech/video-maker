@@ -156,8 +156,11 @@ export async function renderVideoPipeline(
     }
   }
 
-  // 2. Synthesize Gemini TTS Voiceovers if enabled
-  const voiceAudioPaths: { sceneIndex: number; audioPath: string }[] = [];
+  // 2. Synthesize Gemini TTS Voiceovers if enabled & create master audio stream
+  const totalAudioBytes = Math.ceil(totalDurationSeconds * 24000) * 2;
+  const fullPcmBuffer = Buffer.alloc(totalAudioBytes); // Silent PCM buffer initially
+  let hasVoiceover = false;
+
   if (payload.voiceSettings && process.env.GEMINI_API_KEY) {
     try {
       const ai = new GoogleGenAI({
@@ -196,10 +199,12 @@ export async function renderVideoPipeline(
             const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
             if (inlineData?.data) {
               const pcmBuffer = Buffer.from(inlineData.data, 'base64');
-              const wavBuffer = addWavHeader(pcmBuffer, 24000);
-              const wavPath = path.join(tempDir, `voice_scene_${i}.wav`);
-              fs.writeFileSync(wavPath, wavBuffer);
-              voiceAudioPaths.push({ sceneIndex: i, audioPath: wavPath });
+              const byteOffset = Math.floor(sceneStartTimeAcc * 24000) * 2;
+              if (byteOffset < fullPcmBuffer.length) {
+                const copyLength = Math.min(pcmBuffer.length, fullPcmBuffer.length - byteOffset);
+                pcmBuffer.copy(fullPcmBuffer, byteOffset, 0, copyLength);
+                hasVoiceover = true;
+              }
             }
           } catch (e) {
             console.warn(`[Renderer] TTS generation warning for scene ${i}:`, e);
@@ -211,6 +216,11 @@ export async function renderVideoPipeline(
       console.warn('[Renderer] Gemini TTS setup warning:', e);
     }
   }
+
+  // Always produce a valid master WAV audio file (voiceover or silent audio track)
+  const masterWavBuffer = addWavHeader(fullPcmBuffer, 24000);
+  const masterAudioPath = path.join(tempDir, 'master_audio.wav');
+  fs.writeFileSync(masterAudioPath, masterWavBuffer);
 
   onProgress?.(20);
 
@@ -401,22 +411,29 @@ export async function renderVideoPipeline(
   const outputPath = path.join(mediaDir, outputFilename);
 
   await new Promise<void>((resolve, reject) => {
-    let command = ffmpeg()
+    ffmpeg()
       .input(path.join(tempDir, 'frame_%06d.png'))
-      .inputOptions(['-framerate 30']);
-
-    // If TTS voices were synthesized, combine audio inputs
-    if (voiceAudioPaths.length > 0) {
-      for (const voiceObj of voiceAudioPaths) {
-        command = command.input(voiceObj.audioPath);
-      }
-    }
-
-    command
+      .inputOptions(['-framerate 30'])
+      .input(masterAudioPath)
       .outputOptions([
         '-c:v libx264',
+        '-preset fast',
+        '-profile:v main',
+        '-level 4.0',
         '-pix_fmt yuv420p',
-        '-preset ultrafast',
+        '-colorspace bt709',
+        '-color_primaries bt709',
+        '-color_trc bt709',
+        '-r 30',
+        '-fps_mode cfr',
+        '-g 30',
+        '-keyint_min 30',
+        '-sc_threshold 0',
+        '-c:a aac',
+        '-b:a 192k',
+        '-ar 44100',
+        '-ac 2',
+        '-shortest',
         '-movflags +faststart',
       ])
       .output(outputPath)
@@ -457,7 +474,7 @@ export async function renderVideoPipeline(
       aspectRatio,
       resolution: `${width}x${height}`,
       format: 'mp4',
-      hasVoiceover: voiceAudioPaths.length > 0,
+      hasVoiceover,
       hasMusic: Boolean(payload.music?.enableAmbientMusic),
       fileSizeBytes: fileStats.size,
       renderedAt: new Date().toISOString(),

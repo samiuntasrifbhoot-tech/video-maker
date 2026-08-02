@@ -13,9 +13,13 @@ import {
   ChevronRight,
   RefreshCw,
   AlertCircle,
-  X
+  X,
+  FolderPlus,
+  Check,
+  Bookmark
 } from 'lucide-react';
 import { Scene } from '../types';
+import { saveStoryboardToLibrary } from '../data/savedStoryboards';
 
 interface AiChatPanelProps {
   onImportScenes?: (newScenes: Scene[], title?: string) => void;
@@ -89,11 +93,16 @@ export default function AiChatPanel({ onImportScenes, isOpen, onClose }: AiChatP
     if (!customText) setInputMessage('');
     setIsTyping(true);
 
+    const conversationHistory = messages.slice(-10).map((m) => ({
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      text: m.text,
+    }));
+
     try {
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: textToSend }),
+        body: JSON.stringify({ message: textToSend, conversationHistory }),
       });
 
       const contentType = response.headers.get('content-type') || '';
@@ -205,6 +214,7 @@ export default function AiChatPanel({ onImportScenes, isOpen, onClose }: AiChatP
                   <VideoJobCard
                     initialJob={msg.videoJob}
                     onImportScenes={onImportScenes}
+                    onClose={onClose}
                   />
                 )}
 
@@ -258,29 +268,38 @@ export default function AiChatPanel({ onImportScenes, isOpen, onClose }: AiChatP
         </div>
 
         {/* Input Bar */}
-        <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center gap-2 shrink-0">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendMessage();
-              }
-            }}
-            placeholder="উদাহরণ: 'আসহাবে কাহাফের ইতিহাস নিয়ে ৩০ সেকেন্ডের রিল বানান'..."
-            disabled={isTyping}
-            className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors disabled:opacity-50"
-          />
+        <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-col gap-2 shrink-0">
+          <div className="flex items-end gap-2">
+            <textarea
+              rows={3}
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={(e) => {
+                // Shift+Enter or Ctrl+Enter to send message, Enter alone inserts a newline
+                if (e.key === 'Enter' && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              placeholder="উদাহরণ: 'আসহাবে কাহাফের ইতিহাস নিয়ে ৩০ সেকেন্ডের রিল বানান'..."
+              disabled={isTyping}
+              className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors disabled:opacity-50 resize-y min-h-[76px] max-h-[180px] custom-scrollbar"
+            />
 
-          <button
-            onClick={() => handleSendMessage()}
-            disabled={!inputMessage.trim() || isTyping}
-            className="p-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-bold rounded-xl transition-all shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isTyping ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
+            <button
+              onClick={() => handleSendMessage()}
+              disabled={!inputMessage.trim() || isTyping}
+              className="p-3.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-bold rounded-2xl transition-all shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0 mb-1"
+              title="মেসেজ পাঠান"
+            >
+              {isTyping ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-sans px-1">
+            <span>💡 <b>Enter</b> চেপে নতুন লাইনে লিখুন</span>
+            <span><b>Shift + Enter</b> বা <b>সেন্ড বাটন</b> চেপে পাঠান</span>
+          </div>
         </div>
       </div>
     </div>
@@ -290,12 +309,15 @@ export default function AiChatPanel({ onImportScenes, isOpen, onClose }: AiChatP
 // Subcomponent: Live Job Status & MP4 Download Card inside Chat
 function VideoJobCard({
   initialJob,
-  onImportScenes
+  onImportScenes,
+  onClose
 }: {
   initialJob: VideoJobState;
   onImportScenes?: (scenes: Scene[], title?: string) => void;
+  onClose?: () => void;
 }) {
   const [job, setJob] = useState<VideoJobState>(initialJob);
+  const [isSaved, setIsSaved] = useState(false);
 
   // Poll video rendering job status from backend
   useEffect(() => {
@@ -341,7 +363,30 @@ function VideoJobCard({
     }));
 
     onImportScenes(formattedScenes, job.videoPayload.title);
-    alert(`"${job.videoPayload.title || 'রিল'}" এর দৃশ্যগুলো মূল স্টোরিবোর্ড এডিটরে সফলভাবে ইম্পোর্ট করা হয়েছে!`);
+    if (onClose) onClose();
+  };
+
+  const handleSaveToLibrary = () => {
+    if (!job.videoPayload?.scenes) return;
+
+    const formattedScenes: Scene[] = job.videoPayload.scenes.map((s: any, idx: number) => ({
+      id: `scene-${Date.now()}-${idx}`,
+      sceneNumber: s.sceneNumber || idx + 1,
+      title: s.title || `দৃশ্য ${idx + 1}`,
+      subtitle: s.subtitle || '',
+      duration: s.duration || 6,
+      motionPreset: s.motionPreset || 'ken-burns-in',
+      imageUrl: s.imageUrl || 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=1000'
+    }));
+
+    saveStoryboardToLibrary({
+      title: job.videoPayload.title || 'আমার ইসলামিক ভিডিও',
+      description: job.videoPayload.description || `${formattedScenes.length} টি দৃশ্য সম্বলিত এআই ইসলামিক ভিডিও স্টোরিবোর্ড`,
+      scenes: formattedScenes,
+    });
+
+    setIsSaved(true);
+    setTimeout(() => setIsSaved(false), 3000);
   };
 
   return (
@@ -396,8 +441,8 @@ function VideoJobCard({
 
       {/* Video Preview & Download links when Completed */}
       {job.status === 'completed' && job.result && (
-        <div className="space-y-3 pt-1">
-          <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950 aspect-[9/16] max-h-64 mx-auto flex items-center justify-center">
+        <div className="space-y-2 pt-1">
+          <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950 aspect-[9/16] max-h-60 mx-auto flex items-center justify-center">
             <video
               src={job.result.downloadUrl}
               controls
@@ -406,26 +451,52 @@ function VideoJobCard({
             />
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
-            <a
-              href={`${job.result.downloadUrl}?download=true`}
-              download
-              className="w-full sm:flex-1 py-2 px-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>MP4 ডাউনলোড করুন</span>
-            </a>
+          <a
+            href={`${job.result.downloadUrl}?download=true`}
+            download
+            className="w-full py-2 px-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>রেন্ডার করা MP4 ডাউনলোড করুন</span>
+          </a>
+        </div>
+      )}
 
-            {onImportScenes && (
-              <button
-                onClick={handleImportToEditor}
-                className="w-full sm:flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 border border-amber-500/30 transition-all cursor-pointer"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>এডিটরে ইম্পোর্ট করুন</span>
-              </button>
+      {/* Always offer Import to Editor and Save to Library buttons if scenes payload exists */}
+      {job.videoPayload?.scenes && (
+        <div className="flex flex-col sm:flex-row items-center gap-2 mt-1">
+          {onImportScenes && (
+            <button
+              type="button"
+              onClick={handleImportToEditor}
+              className="w-full sm:flex-1 py-2.5 px-3 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-400 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-sans font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
+            >
+              <Layers className="w-4 h-4 text-slate-950" />
+              <span>🎨 এডিটরে লোড করুন</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleSaveToLibrary}
+            className={`w-full sm:flex-1 py-2.5 px-3 text-xs font-sans font-bold rounded-xl flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+              isSaved
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/30'
+            }`}
+          >
+            {isSaved ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-400" />
+                <span>লাইব্রেরীতে সেভ হয়েছে! ✓</span>
+              </>
+            ) : (
+              <>
+                <FolderPlus className="w-4 h-4 text-amber-400" />
+                <span>📁 লাইব্রেরীতে সেভ করুন</span>
+              </>
             )}
-          </div>
+          </button>
         </div>
       )}
     </div>

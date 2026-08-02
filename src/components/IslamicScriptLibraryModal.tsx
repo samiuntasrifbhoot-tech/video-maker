@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   BookOpen,
   X,
@@ -20,9 +20,18 @@ import {
   Clock,
   Film,
   Layers,
+  Trash2,
+  FolderPlus,
+  Bookmark,
 } from 'lucide-react';
 import { Scene } from '../types';
 import { ISLAMIC_SCRIPT_LIBRARY, ScriptItem } from '../data/islamicScripts';
+import {
+  getSavedStoryboards,
+  deleteSavedStoryboard,
+  saveStoryboardToLibrary,
+  SavedStoryboardItem,
+} from '../data/savedStoryboards';
 
 interface IslamicScriptLibraryModalProps {
   isOpen: boolean;
@@ -44,8 +53,37 @@ export default function IslamicScriptLibraryModal({
   const [expandedScriptId, setExpandedScriptId] = useState<string | null>(null);
   const [loadedSuccessId, setLoadedSuccessId] = useState<string | null>(null);
 
-  // Tab state for Library vs JSON Config Manager
-  const [activeTab, setActiveTab] = useState<'library' | 'config'>('library');
+  // Tab state for Library vs Saved vs JSON Config Manager
+  const [activeTab, setActiveTab] = useState<'library' | 'saved' | 'config'>('library');
+  const [savedList, setSavedList] = useState<SavedStoryboardItem[]>([]);
+  const [saveCurrentSuccess, setSaveCurrentSuccess] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSavedList(getSavedStoryboards());
+    }
+  }, [isOpen]);
+
+  const handleDeleteSavedItem = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('আপনি কি সত্যিই এই সেভ করা স্টোরিবোর্ডটি মুছে ফেলতে চান?')) {
+      const updated = deleteSavedStoryboard(id);
+      setSavedList(updated);
+    }
+  };
+
+  const handleSaveCurrentProjectToLibrary = () => {
+    if (!scenes || scenes.length === 0) return;
+    const title = scenes[0]?.title ? `${scenes[0].title}` : 'আমার ইসলামিক রিলস';
+    saveStoryboardToLibrary({
+      title,
+      description: `এডিটরে তৈরি ${scenes.length} টি দৃশ্য সম্বলিত কাস্টম স্টোরিবোর্ড`,
+      scenes,
+    });
+    setSavedList(getSavedStoryboards());
+    setSaveCurrentSuccess(true);
+    setTimeout(() => setSaveCurrentSuccess(false), 2500);
+  };
 
   // Config tab states
   const [copied, setCopied] = useState(false);
@@ -210,11 +248,11 @@ export default function IslamicScriptLibraryModal({
           </button>
         </div>
 
-        {/* Navigation Tabs (Library vs JSON Config) */}
-        <div className="flex border-b border-slate-800 bg-slate-950/40 px-5 pt-2">
+        {/* Navigation Tabs (Library vs Saved vs JSON Config) */}
+        <div className="flex border-b border-slate-800 bg-slate-950/40 px-5 pt-2 gap-1 overflow-x-auto custom-scrollbar">
           <button
             onClick={() => setActiveTab('library')}
-            className={`flex items-center gap-2 px-4 py-2.5 font-sans text-xs font-bold border-b-2 transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2.5 font-sans text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'library'
                 ? 'border-amber-500 text-amber-400 bg-amber-500/10 rounded-t-lg'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -225,8 +263,23 @@ export default function IslamicScriptLibraryModal({
           </button>
 
           <button
+            onClick={() => {
+              setSavedList(getSavedStoryboards());
+              setActiveTab('saved');
+            }}
+            className={`flex items-center gap-2 px-4 py-2.5 font-sans text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'saved'
+                ? 'border-amber-500 text-amber-400 bg-amber-500/10 rounded-t-lg'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <FolderPlus className="w-4 h-4 text-amber-500" />
+            <span>আমার সেভ করা রিলস ({savedList.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('config')}
-            className={`flex items-center gap-2 px-4 py-2.5 font-sans text-xs font-bold border-b-2 transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2.5 font-sans text-xs font-bold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'config'
                 ? 'border-amber-500 text-amber-400 bg-amber-500/10 rounded-t-lg'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -410,7 +463,190 @@ export default function IslamicScriptLibraryModal({
           </div>
         )}
 
-        {/* Tab 2: Custom JSON Config Manager */}
+        {/* Tab 2: My Saved Reels / Storyboards */}
+        {activeTab === 'saved' && (
+          <div className="flex flex-col flex-1 overflow-hidden p-5 gap-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+              <div>
+                <h3 className="text-sm font-sans font-bold text-slate-100 flex items-center gap-2">
+                  <Bookmark className="w-4 h-4 text-amber-500" />
+                  আমার সেভ করা ইসলামিক রিলস ও স্টোরিবোর্ড
+                </h3>
+                <p className="text-xs text-slate-400 font-sans">
+                  অ্যাসিস্ট্যান্ট দিয়ে তৈরি বা আপনার নিজস্ব সেভ করা গল্পগুলো যেকোনো সময় এডিটর এ লোড করুন
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveCurrentProjectToLibrary}
+                className="shrink-0 flex items-center justify-center gap-2 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 text-xs font-sans font-extrabold rounded-xl shadow-md transition-all cursor-pointer"
+              >
+                {saveCurrentSuccess ? (
+                  <>
+                    <Check className="w-4 h-4 text-slate-950" />
+                    <span>সেভ হয়েছে! ✓</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 text-slate-950" />
+                    <span>বর্তমান ক্যানভাস সেভ করুন</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 custom-scrollbar">
+              {savedList.length === 0 ? (
+                <div className="text-center py-12 px-4 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 flex flex-col items-center gap-3">
+                  <FolderPlus className="w-10 h-10 text-slate-600" />
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-sans font-bold text-slate-300">
+                      আপনার লাইব্রেরীতে কোনো সেভ করা স্টোরিবোর্ড নেই
+                    </p>
+                    <p className="text-xs text-slate-500 font-sans max-w-md">
+                      অ্যাসিস্ট্যান্ট দিয়ে ভিডিও বানানোর পর "📁 লাইব্রেরীতে সেভ করুন" চাপুন অথবা উপরের "বর্তমান ক্যানভাস সেভ করুন" বাটন ক্লিক করুন।
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                savedList.map((item) => {
+                  const isExpanded = expandedScriptId === item.id;
+                  const isLoaded = loadedSuccessId === item.id;
+                  const createdDate = new Date(item.createdAt).toLocaleDateString('bn-BD', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 hover:border-slate-700 transition-all duration-300"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-sans font-extrabold text-slate-100 text-sm">
+                              {item.title}
+                            </span>
+                            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] px-2.5 py-0.5 rounded-full font-bold font-sans">
+                              {item.category}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 font-sans leading-relaxed">
+                            {item.description}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* Load button */}
+                          <button
+                            onClick={() => {
+                              const freshScenes: Scene[] = item.scenes.map((s, idx) => ({
+                                ...s,
+                                id: `saved-loaded-${item.id}-${Date.now()}-${idx}`,
+                                sceneNumber: idx + 1,
+                              }));
+                              setScenes(freshScenes);
+                              setCurrentSceneIndex(0);
+                              setLoadedSuccessId(item.id);
+                              setTimeout(() => {
+                                setLoadedSuccessId(null);
+                                onClose();
+                              }, 900);
+                            }}
+                            className={`flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl font-sans text-xs font-bold transition-all duration-300 cursor-pointer shadow-md ${
+                              isLoaded
+                                ? 'bg-green-500 text-slate-950 animate-bounce'
+                                : 'bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-slate-950 hover:shadow-amber-500/20 active:scale-95'
+                            }`}
+                          >
+                            {isLoaded ? (
+                              <>
+                                <Check className="w-4 h-4 text-slate-950" />
+                                <span>লোড হয়েছে!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="w-4 h-4 text-slate-950 stroke-[3]" />
+                                <span>এডিটরে লোড করুন</span>
+                              </>
+                            )}
+                          </button>
+
+                          {/* Delete button */}
+                          <button
+                            onClick={(e) => handleDeleteSavedItem(item.id, e)}
+                            className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 transition-all cursor-pointer"
+                            title="লাইব্রেরী থেকে এই গল্পটি মুছে ফেলুন"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-850 pt-2 text-[11px] font-sans text-slate-400">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Film className="w-3.5 h-3.5 text-amber-500" />
+                          <span>{item.scenes.length} টি দৃশ্য</span>
+                          <span>•</span>
+                          <Clock className="w-3.5 h-3.5 text-amber-500" />
+                          <span>প্রায় {item.totalDuration} সেকেন্ড</span>
+                          <span>•</span>
+                          <span className="text-slate-500">{createdDate}</span>
+                        </div>
+
+                        <button
+                          onClick={() => setExpandedScriptId(isExpanded ? null : item.id)}
+                          className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-bold cursor-pointer"
+                        >
+                          <span>{isExpanded ? 'দৃশ্য তালিকা লুকান' : 'দৃশ্যসমূহ বিস্তারিত দেখুন'}</span>
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="flex flex-col gap-2 mt-2 pt-3 border-t border-slate-850 bg-slate-900/60 p-3 rounded-xl">
+                          <span className="text-[11px] font-sans font-bold text-amber-400 mb-1">
+                            স্ক্রিপ্টের দৃশ্য ও সাবটাইটেল বিবরণ:
+                          </span>
+                          {item.scenes.map((sc, sIdx) => (
+                            <div
+                              key={sc.id || sIdx}
+                              className="flex items-start justify-between gap-3 bg-slate-950 p-2.5 rounded-lg border border-slate-800/80"
+                            >
+                              <div className="flex items-start gap-2.5 overflow-hidden">
+                                <img
+                                  src={sc.imageUrl}
+                                  alt={sc.title}
+                                  className="w-12 h-12 object-cover rounded-md shrink-0 border border-slate-800"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="flex flex-col overflow-hidden">
+                                  <span className="text-xs font-sans font-bold text-slate-200">
+                                    দৃশ্য #{sIdx + 1}: {sc.title} ({sc.duration}s)
+                                  </span>
+                                  <p className="text-[11px] font-sans text-slate-400 leading-snug line-clamp-2">
+                                    "{sc.subtitle}"
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Custom JSON Config Manager */}
         {activeTab === 'config' && (
           <div className="flex flex-col flex-1 overflow-y-auto p-5 gap-4 custom-scrollbar">
             <div className="flex flex-col gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">

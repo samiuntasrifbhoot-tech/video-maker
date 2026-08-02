@@ -179,7 +179,7 @@ export default function SettingsPanel({
           title="সাবটাইটেল ফন্ট, কালার ও স্টাইল এডিটর"
           subtitle="বাংলা ফন্ট, টেক্সট কালার, সাইজ ও পজিশন পরিবর্তন করুন"
           icon={<Type className="w-4 h-4 text-amber-500" />}
-          defaultOpen={true}
+          defaultOpen={false}
         >
           <div className="flex flex-col gap-4">
             {/* Subtitle Color Selector */}
@@ -371,7 +371,7 @@ export default function SettingsPanel({
           subtitle="পুরো ভিডিওর জন্য ১টি প্রধান অডিও অথবা Gemini AI ভয়েস"
           icon={<Mic className="w-4 h-4 text-amber-500" />}
           badge={settings.enableVoiceover ? 'অন' : 'অফ'}
-          defaultOpen={true}
+          defaultOpen={false}
         >
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between bg-slate-900/80 p-3 rounded-xl border border-slate-800">

@@ -25,6 +25,7 @@ export interface Scene {
   duration: number; // in seconds
   voiceoverAudioUrl?: string;
   voiceoverAudioName?: string;
+  imagePrompt?: string;
 }
 
 export interface VideoSettings {
